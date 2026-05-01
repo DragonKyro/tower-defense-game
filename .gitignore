@@ -41,3 +41,5 @@ Thumbs.db
 
 # Procedurally generated sprite cache (regenerated on run)
 generated_sprites/
+# Procedurally generated audio cache (regenerated on run)
+generated_audio/

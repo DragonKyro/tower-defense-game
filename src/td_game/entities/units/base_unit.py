@@ -49,6 +49,11 @@ class BaseUnit(Entity):
         self.stunned: bool = False
         # Scene back-reference set by spawn_unit; enables pursuit to look up enemies.
         self._scene = None
+        # HP regen per second when out of combat (no blocking, no recent damage).
+        # Subclasses may override; heroes get a higher value.
+        self.regen_rate: float = 6.0
+        self._out_of_combat_time: float = 0.0
+        self.REGEN_DELAY = 3.0  # seconds of peace before regen kicks in
 
     def has_free_slot(self) -> bool:
         self.blocking = [e for e in self.blocking if e.alive]
@@ -81,6 +86,13 @@ class BaseUnit(Entity):
                 e._attack_cd = 0.0
         self.blocking.clear()
 
+    def take_damage(self, packet):
+        applied = super().take_damage(packet)
+        if applied:
+            # Incoming damage resets the out-of-combat clock.
+            self._out_of_combat_time = 0.0
+        return applied
+
     def on_update(self, dt: float) -> None:
         super().on_update(dt)
         if not self.alive or self.stunned:
@@ -89,6 +101,13 @@ class BaseUnit(Entity):
             self._cooldown -= dt
         # Clean dead blocked enemies.
         self.blocking = [e for e in self.blocking if e.alive]
+        # Regen: tick only while nothing is being blocked.
+        if not self.blocking:
+            self._out_of_combat_time += dt
+            if self._out_of_combat_time >= self.REGEN_DELAY and self.hp < self.max_hp:
+                self.hp = min(self.max_hp, self.hp + self.regen_rate * dt)
+        else:
+            self._out_of_combat_time = 0.0
         from td_game.graphics.anim_controller import AnimState
         if self.blocking:
             target = self.blocking[0]

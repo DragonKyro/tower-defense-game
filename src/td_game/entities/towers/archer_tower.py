@@ -6,7 +6,7 @@ from td_game.core.damage import DamagePacket
 from td_game.core.resources import load_texture
 
 from .base_tower import BaseTower
-from ..projectiles.base_projectile import HomingProjectile
+from ..projectiles.base_projectile import ArcToTargetProjectile
 
 
 class ArcherTower(BaseTower):
@@ -30,7 +30,12 @@ class ArcherTower(BaseTower):
             t = target if i == 0 else self._alt_target(scene, skip=target)
             if t is None:
                 break
-            scene.spawn_projectile(HomingProjectile(tex, self.center_x, self.center_y, 420, packet, t))
+            # Arrows loft — parabolic flight that gently tracks the target,
+            # like the archer towers in Kingdom Rush.
+            scene.spawn_projectile(
+                ArcToTargetProjectile(tex, self.center_x, self.center_y,
+                                      target=t, speed=380, packet=packet)
+            )
 
     def _alt_target(self, scene, skip) -> object | None:
         from . import targeting as tgt

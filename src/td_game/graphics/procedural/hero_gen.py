@@ -38,6 +38,12 @@ def generate(name: str) -> Image.Image:
         _knight(img, d, s, bob, lean, arm, state, frame)
     elif kind == "ranger":
         _ranger(img, d, s, bob, lean, arm, state, frame)
+    elif kind == "footman":
+        _footman(img, d, s, bob, lean, arm, state, frame)
+    elif kind == "soldier":
+        _soldier(img, d, s, bob, lean, arm, state, frame)
+    elif kind == "peasant":
+        _peasant(img, d, s, bob, lean, arm, state, frame)
     else:
         _knight(img, d, s, bob, lean, arm, state, frame)
 
@@ -51,31 +57,52 @@ def generate(name: str) -> Image.Image:
 
 
 def _knight(img, d, s, bob, lean, arm, state, frame) -> None:
+    """Hero knight — iconic: crimson cape, tall gold-tipped plume, gold pauldrons."""
     cx = cy = TILE_SIZE // 2
-    soft_shadow(img, cx, cy + 16, 13, 5, scale=s, alpha=130)
-    # Legs (feet planted, stride by horizontal offset).
+    soft_shadow(img, cx, cy + 17, 15, 6, scale=s, alpha=140)
+    # Cape flowing behind (under the body so shoulders clip it).
+    cape_pts = [
+        (cx - 11, cy - 8 + bob),
+        (cx + 11, cy - 8 + bob),
+        (cx + 9, cy + 12),
+        (cx + 2, cy + 18),
+        (cx - 2, cy + 18),
+        (cx - 9, cy + 12),
+    ]
+    outline_polygon(d, cape_pts, P.BANNER_RED, scale=s, shadow=True)
+    # Legs with light armor.
     leg_y = cy + 6
     shaded_rect(d, cx - 6 + lean, leg_y, 4, 8, P.KNIGHT_STEEL_DARK, scale=s)
     shaded_rect(d, cx + 2 - lean, leg_y, 4, 8, P.KNIGHT_STEEL_DARK, scale=s)
-    # Torso (1px bob peak).
+    # Torso — highlighted plate with royal blue tabard + gold emblem.
     body_y = cy - 8 + bob
     shaded_rect(d, cx - 9, body_y, 18, 16, P.KNIGHT_STEEL, scale=s)
     d.rectangle(((cx - 4) * s, body_y * s, (cx + 4) * s, (body_y + 16) * s), fill=P.KNIGHT_BLUE)
     d.polygon([((cx - 4) * s, (body_y + 16) * s), ((cx + 4) * s, (body_y + 16) * s),
                (cx * s, (body_y + 20) * s)], fill=P.KNIGHT_BLUE_DARK)
-    d.ellipse(((cx - 2) * s, (body_y + 4) * s, (cx + 2) * s, (body_y + 8) * s), fill=P.KNIGHT_GOLD)
-    # Shoulders (fixed).
-    shaded_circle(d, cx - 10, body_y + 1, 4, P.KNIGHT_STEEL, scale=s,
-                  shadow_tint=P.KNIGHT_STEEL_DARK, highlight_tint=P.KNIGHT_STEEL_LIGHT)
-    shaded_circle(d, cx + 10, body_y + 1, 4, P.KNIGHT_STEEL, scale=s,
-                  shadow_tint=P.KNIGHT_STEEL_DARK, highlight_tint=P.KNIGHT_STEEL_LIGHT)
-    # Head.
-    head_cy = cy - 15 + bob
+    # Bigger gold crest on tabard.
+    d.ellipse(((cx - 3) * s, (body_y + 3) * s, (cx + 3) * s, (body_y + 9) * s), fill=P.KNIGHT_GOLD)
+    d.line(((cx - 3) * s, (body_y + 6) * s, (cx + 3) * s, (body_y + 6) * s),
+           fill=P.KNIGHT_GOLD_DARK, width=1 * s)
+    # Gold pauldrons — bigger + gold-tinted.
+    shaded_circle(d, cx - 10, body_y + 1, 5, P.KNIGHT_GOLD, scale=s,
+                  shadow_tint=P.KNIGHT_GOLD_DARK, highlight_tint=(255, 240, 180, 255))
+    shaded_circle(d, cx + 10, body_y + 1, 5, P.KNIGHT_GOLD, scale=s,
+                  shadow_tint=P.KNIGHT_GOLD_DARK, highlight_tint=(255, 240, 180, 255))
+    # Head / helmet.
+    head_cy = cy - 16 + bob
     shaded_circle(d, cx, head_cy, 7, P.KNIGHT_STEEL, scale=s,
                   shadow_tint=P.KNIGHT_STEEL_DARK, highlight_tint=P.KNIGHT_STEEL_LIGHT)
-    d.rectangle(((cx - 4) * s, (head_cy - 1) * s, (cx + 4) * s, (head_cy + 1) * s), fill=(20, 20, 24, 255))
-    plume_pts = [(cx - 1, head_cy - 7), (cx + 6, head_cy - 12), (cx + 2, head_cy - 6)]
-    outline_polygon(d, plume_pts, P.BANNER_RED, scale=s)
+    # Visor slit.
+    d.rectangle(((cx - 4) * s, (head_cy - 1) * s, (cx + 4) * s, (head_cy + 1) * s),
+                fill=(20, 20, 24, 255))
+    # TALL plume — 3 colors stacked: gold tip, red body, white base flourish.
+    plume_a = [(cx - 1, head_cy - 4), (cx + 7, head_cy - 12), (cx + 3, head_cy - 6)]
+    outline_polygon(d, plume_a, P.BANNER_RED, scale=s, shadow=False)
+    plume_b = [(cx + 4, head_cy - 10), (cx + 10, head_cy - 18), (cx + 6, head_cy - 12)]
+    outline_polygon(d, plume_b, P.BANNER_RED, scale=s, shadow=False)
+    plume_tip = [(cx + 8, head_cy - 16), (cx + 11, head_cy - 20), (cx + 9, head_cy - 16)]
+    d.polygon([(p[0] * s, p[1] * s) for p in plume_tip], fill=P.KNIGHT_GOLD)
     # Sword: dramatic overhead swing during attack frames.
     # Frame 0 = wind-up (raised high behind), 1 = down-strike across,
     # 2 = follow-through (extended forward). Gives a readable arc.
@@ -127,6 +154,172 @@ def _knight(img, d, s, bob, lean, arm, state, frame) -> None:
     d.line((shield_x * s, body_y * s, shield_x * s, (body_y + 9) * s), fill=P.KNIGHT_GOLD, width=1 * s)
     d.line(((shield_x - 4) * s, (body_y + 4) * s, (shield_x + 4) * s, (body_y + 4) * s),
            fill=P.KNIGHT_GOLD, width=1 * s)
+
+
+def _footman(img, d, s, bob, lean, arm, state, frame) -> None:
+    """Tier-1/2 barracks soldier — padded cloth + red tabard, no helmet plume.
+
+    Simpler than the hero knight: no cape, iron cap instead of plated helm,
+    plain round shield. Reads as 'conscript' vs. the hero's 'royal knight'.
+    """
+    cx = cy = TILE_SIZE // 2
+    soft_shadow(img, cx, cy + 16, 11, 4, scale=s, alpha=120)
+    # Legs — plain leather.
+    leg_y = cy + 6
+    shaded_rect(d, cx - 5 + lean, leg_y, 4, 7, P.LEATHER_DARK, scale=s)
+    shaded_rect(d, cx + 1 - lean, leg_y, 4, 7, P.LEATHER_DARK, scale=s)
+    # Padded gambeson body with a small red tabard strip.
+    body_y = cy - 7 + bob
+    shaded_rect(d, cx - 8, body_y, 16, 14, (206, 188, 148, 255), scale=s)
+    d.rectangle(((cx - 3) * s, body_y * s, (cx + 3) * s, (body_y + 14) * s), fill=P.BANNER_RED)
+    # Leather belt + round metal boss.
+    d.rectangle(((cx - 8) * s, (body_y + 10) * s, (cx + 8) * s, (body_y + 12) * s),
+                fill=P.LEATHER_DARK)
+    d.ellipse(((cx - 1) * s, (body_y + 9) * s, (cx + 2) * s, (body_y + 12) * s),
+              fill=P.KNIGHT_STEEL_LIGHT)
+    # Arms bare / leather-sleeved.
+    shaded_rect(d, cx - 10 + arm, body_y + 1, 3, 10, (200, 170, 130, 255), scale=s)
+    shaded_rect(d, cx + 7 - arm, body_y + 1, 3, 10, (200, 170, 130, 255), scale=s)
+    # Iron cap (no visor, no plume).
+    head_cy = cy - 13 + bob
+    shaded_circle(d, cx, head_cy, 6, (220, 200, 168, 255), scale=s,
+                  shadow_tint=(160, 140, 110, 255), highlight_tint=(240, 228, 200, 255))
+    # Bowl cap on top.
+    d.polygon([((cx - 7) * s, (head_cy - 2) * s),
+               ((cx + 7) * s, (head_cy - 2) * s),
+               ((cx + 5) * s, (head_cy - 7) * s),
+               ((cx - 5) * s, (head_cy - 7) * s)],
+              fill=P.KNIGHT_STEEL)
+    d.line(((cx - 7) * s, (head_cy - 2) * s, (cx + 7) * s, (head_cy - 2) * s),
+           fill=(20, 20, 24, 255), width=1 * s)
+    # Eyes.
+    d.point((cx - 2, head_cy + 1), fill=(20, 20, 24))
+    d.point((cx + 2, head_cy + 1), fill=(20, 20, 24))
+    # Round wooden shield.
+    shield_x = cx - 12 - arm
+    shaded_circle(d, shield_x, body_y + 4, 5, P.WOOD, scale=s,
+                  shadow_tint=P.WOOD_DARK, highlight_tint=(180, 130, 88, 255))
+    d.ellipse(((shield_x - 2) * s, (body_y + 2) * s,
+               (shield_x + 2) * s, (body_y + 6) * s),
+              fill=P.KNIGHT_STEEL_LIGHT)
+    # Short sword at the hip.
+    if state == "attack":
+        import math as _m
+        ang = _m.radians((-95, 15, 55)[frame % 3])
+        hx = cx + 3
+        hy = cy - 5
+        tip_x = hx + _m.sin(ang) * 18
+        tip_y = hy - _m.cos(ang) * 18
+        nx = _m.cos(ang)
+        ny = _m.sin(ang)
+        blade = [
+            (hx + nx * 2, hy + ny * 2),
+            (hx - nx * 2, hy - ny * 2),
+            (tip_x - nx, tip_y - ny),
+            (tip_x + nx, tip_y + ny),
+        ]
+        d.polygon([(p[0] * s, p[1] * s) for p in blade], fill=P.KNIGHT_STEEL_LIGHT)
+    else:
+        d.rectangle(((cx + 10) * s, (cy - 6) * s, (cx + 12) * s, (cy + 4) * s),
+                    fill=P.KNIGHT_STEEL_LIGHT)
+        d.rectangle(((cx + 9) * s, (cy - 6) * s, (cx + 13) * s, (cy - 5) * s),
+                    fill=P.KNIGHT_GOLD_DARK)
+
+
+def _soldier(img, d, s, bob, lean, arm, state, frame) -> None:
+    """Tier-3/4 barracks soldier — plated armor, steel helm with visor, kite shield."""
+    cx = cy = TILE_SIZE // 2
+    soft_shadow(img, cx, cy + 16, 13, 5, scale=s, alpha=130)
+    leg_y = cy + 6
+    shaded_rect(d, cx - 6 + lean, leg_y, 4, 8, P.KNIGHT_STEEL_DARK, scale=s)
+    shaded_rect(d, cx + 2 - lean, leg_y, 4, 8, P.KNIGHT_STEEL_DARK, scale=s)
+    # Steel chestplate.
+    body_y = cy - 8 + bob
+    shaded_rect(d, cx - 9, body_y, 18, 15, P.KNIGHT_STEEL, scale=s)
+    # Green tabard stripe (so not identical to blue-tabard hero).
+    d.rectangle(((cx - 3) * s, body_y * s, (cx + 3) * s, (body_y + 15) * s),
+                fill=(80, 140, 80, 255))
+    d.ellipse(((cx - 2) * s, (body_y + 4) * s, (cx + 2) * s, (body_y + 8) * s),
+              fill=P.KNIGHT_STEEL_LIGHT)
+    # Steel pauldrons (no gold).
+    shaded_circle(d, cx - 10, body_y + 1, 4, P.KNIGHT_STEEL_DARK, scale=s,
+                  shadow_tint=(80, 88, 108, 255), highlight_tint=P.KNIGHT_STEEL)
+    shaded_circle(d, cx + 10, body_y + 1, 4, P.KNIGHT_STEEL_DARK, scale=s,
+                  shadow_tint=(80, 88, 108, 255), highlight_tint=P.KNIGHT_STEEL)
+    # Great helm with slit.
+    head_cy = cy - 15 + bob
+    shaded_circle(d, cx, head_cy, 7, P.KNIGHT_STEEL, scale=s,
+                  shadow_tint=P.KNIGHT_STEEL_DARK, highlight_tint=P.KNIGHT_STEEL_LIGHT)
+    d.rectangle(((cx - 4) * s, (head_cy - 1) * s, (cx + 4) * s, (head_cy + 1) * s),
+                fill=(20, 20, 24, 255))
+    # Short black plume (distinct from hero's tall red plume).
+    d.polygon([((cx - 1) * s, (head_cy - 6) * s),
+               ((cx + 3) * s, (head_cy - 10) * s),
+               ((cx + 1) * s, (head_cy - 5) * s)], fill=(40, 40, 50, 255))
+    # Kite shield on left, sword or nothing on right.
+    shield_x = cx - 12 - arm
+    shaded_rect(d, shield_x - 3, body_y, 6, 10, (80, 140, 80, 255), scale=s,
+                outline=(30, 60, 30, 255))
+    d.polygon([((shield_x - 3) * s, (body_y + 10) * s),
+               ((shield_x + 3) * s, (body_y + 10) * s),
+               (shield_x * s, (body_y + 14) * s)], fill=(80, 140, 80, 255))
+    # Mace head on right (distinct weapon — not a longsword).
+    if state == "attack":
+        import math as _m
+        ang = _m.radians((-90, 30, 60)[frame % 3])
+        hx = cx + 4
+        hy = cy - 4
+        tip_x = hx + _m.sin(ang) * 16
+        tip_y = hy - _m.cos(ang) * 16
+        d.line((hx * s, hy * s, tip_x * s, tip_y * s), fill=P.WOOD_DARK, width=2 * s)
+        d.ellipse(((tip_x - 4) * s, (tip_y - 4) * s, (tip_x + 4) * s, (tip_y + 4) * s),
+                  fill=P.KNIGHT_STEEL)
+    else:
+        d.line(((cx + 10) * s, (cy - 10) * s, (cx + 10) * s, (cy + 6) * s),
+               fill=P.WOOD_DARK, width=2 * s)
+        d.ellipse(((cx + 7) * s, (cy - 14) * s, (cx + 13) * s, (cy - 8) * s),
+                  fill=P.KNIGHT_STEEL)
+
+
+def _peasant(img, d, s, bob, lean, arm, state, frame) -> None:
+    """Reinforcement — conscripted peasant with a brown tunic and pitchfork."""
+    cx = cy = TILE_SIZE // 2
+    soft_shadow(img, cx, cy + 16, 10, 4, scale=s, alpha=110)
+    # Bare legs / trousers.
+    leg_y = cy + 6
+    shaded_rect(d, cx - 5 + lean, leg_y, 4, 7, (124, 96, 72, 255), scale=s)
+    shaded_rect(d, cx + 1 - lean, leg_y, 4, 7, (124, 96, 72, 255), scale=s)
+    # Brown tunic, rope belt.
+    body_y = cy - 7 + bob
+    shaded_rect(d, cx - 7, body_y, 14, 13, (160, 120, 84, 255), scale=s,
+                outline=(82, 58, 36, 255))
+    d.rectangle(((cx - 7) * s, (body_y + 9) * s, (cx + 7) * s, (body_y + 10) * s),
+                fill=(96, 72, 48, 255))
+    # Arms in rolled-up sleeves.
+    shaded_rect(d, cx - 9 + arm, body_y + 1, 3, 9, (215, 188, 150, 255), scale=s)
+    shaded_rect(d, cx + 6 - arm, body_y + 1, 3, 9, (215, 188, 150, 255), scale=s)
+    # Straw hat.
+    head_cy = cy - 13 + bob
+    shaded_circle(d, cx, head_cy, 5, (215, 188, 150, 255), scale=s,
+                  shadow_tint=(160, 128, 90, 255), highlight_tint=(240, 220, 185, 255))
+    # Hat brim.
+    d.ellipse(((cx - 9) * s, (head_cy - 5) * s, (cx + 9) * s, (head_cy - 2) * s),
+              fill=(212, 180, 100, 255))
+    d.polygon([((cx - 6) * s, (head_cy - 5) * s),
+               ((cx + 6) * s, (head_cy - 5) * s),
+               ((cx + 3) * s, (head_cy - 10) * s),
+               ((cx - 3) * s, (head_cy - 10) * s)],
+              fill=(228, 200, 120, 255))
+    d.point((cx - 2, head_cy + 1), fill=(20, 20, 24))
+    d.point((cx + 2, head_cy + 1), fill=(20, 20, 24))
+    # Pitchfork held upright on the right.
+    fork_x = cx + 10 - arm
+    d.rectangle((fork_x * s, (cy - 16) * s, (fork_x + 2) * s, (cy + 8) * s),
+                fill=P.WOOD_DARK)
+    for tine in (-3, 0, 3):
+        d.rectangle(((fork_x + tine) * s, (cy - 22) * s,
+                     (fork_x + tine + 1) * s, (cy - 14) * s),
+                    fill=P.KNIGHT_STEEL_LIGHT)
 
 
 def _ranger(img, d, s, bob, lean, arm, state, frame) -> None:

@@ -10,6 +10,8 @@ from ..base_skill import BaseSkill, SkillContext, TargetKind
 class PoisonArrow(BaseSkill):
     id = "poison_arrow"
     display_name = "Poison Arrow"
+    description = "1.5x damage to one enemy and poisons them for 5 seconds."
+    icon = "poisonarrow_0"
     target_kind = TargetKind.ENEMY
 
     def __init__(self) -> None:
@@ -27,6 +29,8 @@ class PoisonArrow(BaseSkill):
 class Volley(BaseSkill):
     id = "volley"
     display_name = "Volley"
+    description = "Rain arrows over an area. 1.2x damage to every enemy in radius."
+    icon = "volley_0"
     target_kind = TargetKind.AREA
 
     def __init__(self) -> None:

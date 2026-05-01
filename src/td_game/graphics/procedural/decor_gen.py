@@ -39,6 +39,8 @@ def generate(name: str) -> Image.Image:
         return _banner(variant)
     if kind == "rallyflag":
         return _rally_flag(variant)
+    if kind == "grave":
+        return _gravestone(variant)
     if kind == "stones":
         return _stones(variant)
     if kind == "castle":
@@ -46,6 +48,32 @@ def generate(name: str) -> Image.Image:
     if kind == "mushroom":
         return _mushroom(variant)
     return _bush(variant)
+
+
+def _gravestone(variant: str) -> Image.Image:
+    """Stone cross + mound — shown where a hero is waiting to respawn."""
+    size = TILE_SIZE
+    img, d, s = new_canvas(size)
+    cx = size // 2
+    cy = size - 18
+    # Dirt mound
+    d.ellipse(((cx - 16) * s, (cy + 4) * s, (cx + 16) * s, (cy + 14) * s),
+              fill=(92, 66, 42, 255))
+    d.ellipse(((cx - 12) * s, (cy + 4) * s, (cx + 12) * s, (cy + 10) * s),
+              fill=(130, 96, 60, 255))
+    # Gravestone arch
+    shaded_rect(d, cx - 8, cy - 14, 16, 18, P.STONE, scale=s)
+    d.arc(((cx - 8) * s, (cy - 18) * s, (cx + 8) * s, (cy - 8) * s),
+          start=180, end=0, fill=P.STONE_DARK, width=2 * s)
+    # Cross carving
+    d.rectangle(((cx - 1) * s, (cy - 10) * s, (cx + 1) * s, (cy) * s),
+                fill=P.STONE_DARK)
+    d.rectangle(((cx - 4) * s, (cy - 7) * s, (cx + 4) * s, (cy - 5) * s),
+                fill=P.STONE_DARK)
+    # Inset highlight on the stone
+    d.ellipse(((cx - 6) * s, (cy - 16) * s, (cx + 6) * s, (cy - 12) * s),
+              fill=(*P.STONE_LIGHT[:3], 180))
+    return finalize(img, size)
 
 
 def _rally_flag(variant: str) -> Image.Image:

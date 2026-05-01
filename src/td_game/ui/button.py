@@ -80,7 +80,9 @@ class Button:
         )
 
     def update_hover(self, px: float, py: float) -> None:
-        self.hovered = self.enabled and self.contains(px, py)
+        # Hover is tracked even when disabled so tooltips can still show —
+        # clicks are gated separately.
+        self.hovered = self.contains(px, py)
 
     def click(self, px: float, py: float) -> bool:
         if self.enabled and self.contains(px, py):
@@ -108,9 +110,9 @@ class Button:
         top = self.y + self.height / 2
 
         if not self.enabled:
-            bg = (34, 34, 42)
-            border = (80, 80, 90)
-            text_color = (120, 116, 110)
+            bg = (34, 34, 42) if not self.hovered else (50, 50, 60)
+            border = (110, 100, 90) if self.hovered else (80, 80, 90)
+            text_color = (150, 140, 120) if self.hovered else (120, 116, 110)
         elif self.hovered:
             bg = (92, 102, 128)
             border = (240, 214, 136)

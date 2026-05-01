@@ -69,7 +69,13 @@ class HomingProjectile(BaseProjectile):
 
 
 class ArcProjectile(BaseProjectile):
-    """Lobs toward a target point; on landing, deals AoE damage."""
+    """Lobs toward a target point; on landing, deals AoE damage.
+
+    Height of the arc scales with throw distance so a far cannon shot
+    visibly lofts higher than a near one — gives the cannons real
+    weight. Sprite rotates with the tangent direction of the arc so
+    the cannonball looks like it's traveling correctly.
+    """
 
     def __init__(self, texture: arcade.Texture, x: float, y: float,
                  target_x: float, target_y: float, speed: float,
@@ -81,7 +87,11 @@ class ArcProjectile(BaseProjectile):
         self._elapsed = 0.0
         self._start_x = x
         self._start_y = y
-        self._total_time = math.hypot(target_x - x, target_y - y) / speed or 0.01
+        distance = math.hypot(target_x - x, target_y - y)
+        self._total_time = distance / speed if speed > 0 else 0.01
+        # Arc height scales with distance — 60-160 px is readable without
+        # leaving the play area.
+        self.arc_height = max(60.0, min(160.0, distance * 0.55))
 
     def on_update(self, dt: float) -> None:
         super().on_update(dt)
@@ -89,14 +99,107 @@ class ArcProjectile(BaseProjectile):
             return
         self._elapsed += dt
         t = min(1.0, self._elapsed / self._total_time)
-        # Arc via parabolic y-offset.
-        self.center_x = self._start_x + (self.target_x - self._start_x) * t
-        base_y = self._start_y + (self.target_y - self._start_y) * t
-        arc = 40 * math.sin(math.pi * t)
-        self.center_y = base_y + arc
+        dx = self.target_x - self._start_x
+        dy_base = self.target_y - self._start_y
+        self.center_x = self._start_x + dx * t
+        arc = self.arc_height * math.sin(math.pi * t)
+        self.center_y = self._start_y + dy_base * t + arc
+        # Rotate to tangent direction (derivative of the parabolic path).
+        dxdt = dx
+        dydt = dy_base + self.arc_height * math.pi * math.cos(math.pi * t)
+        self.angle = math.degrees(math.atan2(dydt, dxdt))
         if t >= 1.0:
             # AoE resolved by the combat system, which reads `aoe_radius`.
             self.dead = True
+
+
+class ArcToTargetProjectile(BaseProjectile):
+    """Ballistic projectile that arcs toward an enemy and hits them on landing.
+
+    Unlike a HomingProjectile it doesn't track sharply — it follows a
+    parabola computed from start→target and only drifts its endpoint
+    toward the target's current position each frame. Gives KR-style
+    arrow flight: visible arc, rotation along the path, minor tracking
+    so a moving enemy still gets hit.
+    """
+
+    def __init__(self, texture: arcade.Texture, x: float, y: float, target,
+                 speed: float, packet: DamagePacket, arc_height: float | None = None) -> None:
+        super().__init__(texture, x, y, speed, packet)
+        self.target = target
+        self._start_x = x
+        self._start_y = y
+        self._elapsed = 0.0
+        initial_dist = math.hypot(target.center_x - x, target.center_y - y)
+        self._total_time = max(0.2, initial_dist / speed) if speed > 0 else 0.5
+        if arc_height is None:
+            arc_height = max(45.0, min(110.0, initial_dist * 0.45))
+        self.arc_height = arc_height
+
+    def on_update(self, dt: float) -> None:
+        super().on_update(dt)
+        if self.dead:
+            return
+        if not self.target.alive:
+            # Target died mid-flight — let the arrow complete the arc to
+            # its last known position, then disappear without damage.
+            self.dead = True
+            return
+        self._elapsed += dt
+        t = min(1.0, self._elapsed / self._total_time)
+        tx = self.target.center_x
+        ty = self.target.center_y
+        dx = tx - self._start_x
+        dy_base = ty - self._start_y
+        self.center_x = self._start_x + dx * t
+        arc = self.arc_height * math.sin(math.pi * t)
+        self.center_y = self._start_y + dy_base * t + arc
+        # Tangent rotation so the arrow visually banks up then down.
+        dxdt = dx
+        dydt = dy_base + self.arc_height * math.pi * math.cos(math.pi * t)
+        self.angle = math.degrees(math.atan2(dydt, dxdt))
+        if t >= 1.0:
+            self.on_impact(self.target, None)
+
+
+class FallingProjectile(BaseProjectile):
+    """Falls straight down from spawn to a target point, dealing AoE on landing.
+
+    Used by the Meteor skill's rain — each meteor is spawned above the
+    play area with a short pre-delay, then drops onto its slightly
+    randomized landing point. AoE resolves via the combat system which
+    reads `aoe_radius`.
+    """
+
+    def __init__(self, texture: arcade.Texture, target_x: float, target_y: float,
+                 spawn_y: float, speed: float, packet: DamagePacket,
+                 aoe_radius: float, fall_delay: float = 0.0) -> None:
+        super().__init__(texture, target_x, spawn_y, speed, packet)
+        self.target_x = target_x
+        self.target_y = target_y
+        self.aoe_radius = aoe_radius
+        self.fall_delay = fall_delay
+        self.alpha = 0 if fall_delay > 0 else 255
+
+    def on_update(self, dt: float) -> None:
+        super().on_update(dt)
+        if self.dead:
+            return
+        if self.fall_delay > 0:
+            self.fall_delay -= dt
+            if self.fall_delay <= 0:
+                self.alpha = 255
+            return
+        dy = self.target_y - self.center_y
+        step = self.speed * dt
+        if abs(dy) <= step:
+            self.center_y = self.target_y
+            self.dead = True
+            return
+        # Always moving downward.
+        self.center_y += -step if dy < 0 else step
+        # Slight wobble for visual interest.
+        self.angle = (self.angle + 360 * dt) % 360
 
 
 class StraightProjectile(BaseProjectile):

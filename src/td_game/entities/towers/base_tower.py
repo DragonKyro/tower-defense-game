@@ -57,9 +57,14 @@ class BaseTower(Entity):
             bus.publish(TOWER_BUILT, tower=self)
 
     def _sprite_key_for(self, row: TowerStatsRow, tier_index: int) -> str:
-        """Return a short key for the current look, e.g. 'archer_2'."""
-        tier_num = (tier_index + 1) if self.current_spec is None else 4
-        return f"{self.family}_{tier_num}"
+        """Return a short key for the current look.
+
+        Tiers 1-3 use `'<family>_<tier>'`. Tier 4 (specialization) uses
+        `'<family>_4_<spec>'` so each spec renders with a unique motif.
+        """
+        if self.current_spec is not None:
+            return f"{self.family}_4_{self.current_spec}"
+        return f"{self.family}_{tier_index + 1}"
 
     def _build_anim(self, tier_index: int):
         """Set up idle/attack animations for this tier. Subclasses may override."""
@@ -144,6 +149,9 @@ class BaseTower(Entity):
         if self.anim is not None:
             from td_game.graphics.anim_controller import AnimState
             self.anim.set_state(AnimState.ATTACK, force=True)
+        # Subtle fire SFX — volume tuned down so a busy map doesn't drown.
+        from td_game.core.audio import audio as _audio
+        _audio.play_sfx("sfx_shoot", 0.35)
         return True
 
     def perform_attack(self, target: "BaseEnemy", scene) -> None:

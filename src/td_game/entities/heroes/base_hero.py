@@ -55,6 +55,9 @@ class BaseHero(BaseUnit):
             engage_radius=stats.engage_radius,
             aggression_radius=stats.aggression_radius,
         )
+        # Heroes regen faster than grunt soldiers.
+        self.regen_rate = 14.0
+        self.REGEN_DELAY = 2.0
         self.stats = stats
         self.speed = stats.speed
         self.armor = stats.armor

@@ -6,6 +6,8 @@ wave manager -> spawner followers -> tower attacks -> projectiles -> combat.
 from __future__ import annotations
 
 import math
+import random
+from dataclasses import dataclass, field
 
 import arcade
 
@@ -16,7 +18,19 @@ from td_game.core.constants import (
     SCREEN_WIDTH,
     TILE_SIZE,
 )
-from td_game.core.events import LEVEL_LOST, LEVEL_WON
+from td_game.core.audio import audio
+from td_game.core.events import (
+    ENEMY_KILLED,
+    HERO_DIED,
+    HERO_RESPAWNED,
+    LEVEL_LOST,
+    LEVEL_WON,
+    SKILL_USED,
+    TOWER_BUILT,
+    TOWER_SOLD,
+    TOWER_UPGRADED,
+    WAVE_STARTED,
+)
 from td_game.core.game_state import GameState
 from td_game.core.resources import load_texture
 from td_game.data.enemies import ENEMIES
@@ -36,6 +50,60 @@ from td_game.ui.tower_menu import BuildMenu, UpgradeMenu
 from td_game.ui.wave_preview import WavePreview
 from td_game.world.level import LevelDef
 from td_game.world.path_geometry import nearest_point_on_curves, smooth_waypoints
+
+
+@dataclass
+class _FxAnim:
+    """Cycles through texture frames + scales + fades over a fixed lifetime."""
+    sprite: arcade.Sprite
+    textures: list
+    duration: float
+    start_scale: float
+    end_scale: float
+    elapsed: float = 0.0
+
+    def tick(self, dt: float) -> bool:
+        """Advance. Return True when done."""
+        self.elapsed += dt
+        t = min(1.0, self.elapsed / max(1e-3, self.duration))
+        # Frame.
+        idx = min(len(self.textures) - 1, int(t * len(self.textures)))
+        self.sprite.texture = self.textures[idx]
+        # Scale (ease-out feel).
+        eased = 1.0 - (1.0 - t) ** 2
+        scale = self.start_scale + (self.end_scale - self.start_scale) * eased
+        self.sprite.scale = (scale, scale)
+        # Fade: hold alpha for the first 60%, then ramp down.
+        if t < 0.6:
+            alpha = 255
+        else:
+            alpha = int(255 * (1.0 - (t - 0.6) / 0.4))
+        self.sprite.alpha = max(0, min(255, alpha))
+        return t >= 1.0
+
+
+@dataclass
+class _FxParticle:
+    """A small sprite with initial velocity, gravity, and fade-out."""
+    sprite: arcade.Sprite
+    vx: float
+    vy: float
+    life: float
+    age: float = 0.0
+    gravity: float = 240.0
+
+    def tick(self, dt: float) -> bool:
+        self.age += dt
+        self.sprite.center_x += self.vx * dt
+        self.sprite.center_y += self.vy * dt
+        self.vy -= self.gravity * dt
+        # Spin based on velocity for a tumbling feel.
+        self.sprite.angle += (self.vx * 0.25) * dt
+        # Fade during last 50%.
+        t = self.age / max(1e-3, self.life)
+        if t > 0.5:
+            self.sprite.alpha = int(255 * (1.0 - (t - 0.5) * 2))
+        return self.age >= self.life
 
 
 class GameView(arcade.View):
@@ -63,7 +131,12 @@ class GameView(arcade.View):
         self._path_curves: list[list[tuple[float, float]]] = []
 
         self._spot_by_sprite: dict = {}
-        self._fx_lifetimes: dict = {}
+        # tower -> the BuildSpot it occupies, so selling can restore the
+        # build-spot sprite and let the player put something else there.
+        self._spot_by_tower: dict = {}
+        # FX animation / particle book-keeping.
+        self._fx_anims: list = []       # _FxAnim
+        self._fx_particles: list = []   # _FxParticle
         self._selected_menu = None
         self._pending_skill = None   # skill awaiting a target
         self._pending_skill_hero = None  # hero casting a targeted skill (if any)
@@ -95,6 +168,7 @@ class GameView(arcade.View):
             on_pause=self._toggle_pause,
             on_speed_toggle=self._toggle_speed,
             on_cast_hero=self._on_hero_skill,
+            on_select_hero=self._on_select_hero,
         )
         self.wave_preview = WavePreview(on_call_early=self._call_next_wave_early)
 
@@ -108,7 +182,19 @@ class GameView(arcade.View):
 
         self.state.bus.subscribe(LEVEL_WON, lambda **_: self._route_to_end(True))
         self.state.bus.subscribe(LEVEL_LOST, lambda **_: self._route_to_end(False))
-        self.state.bus.subscribe("wave_started", self._on_wave_started)
+        self.state.bus.subscribe(WAVE_STARTED, self._on_wave_started)
+
+        # Audio hooks — keep them here so audio is purely observational
+        # and gameplay systems don't need to know about the AudioManager.
+        self.state.bus.subscribe(WAVE_STARTED, lambda **_: audio.play_sfx("sfx_wave_start"))
+        self.state.bus.subscribe(TOWER_BUILT, lambda **_: audio.play_sfx("sfx_build"))
+        self.state.bus.subscribe(TOWER_UPGRADED, lambda **_: audio.play_sfx("sfx_build", 0.8))
+        self.state.bus.subscribe(TOWER_SOLD, lambda **_: audio.play_sfx("sfx_gold"))
+        self.state.bus.subscribe(ENEMY_KILLED, self._on_enemy_killed_audio)
+        self.state.bus.subscribe(HERO_DIED, lambda **_: audio.play_sfx("sfx_hero_death"))
+        self.state.bus.subscribe(HERO_RESPAWNED, lambda **_: audio.play_sfx("sfx_cast", 0.8))
+        self.state.bus.subscribe(SKILL_USED, lambda **_: audio.play_sfx("sfx_cast"))
+        self.state.bus.subscribe(LEVEL_WON, lambda **_: audio.play_sfx("sfx_victory"))
 
         self._build_background()
         self._build_paths()
@@ -128,6 +214,51 @@ class GameView(arcade.View):
         # Play area is the region above HUD_HEIGHT.
         sp.center_y = HUD_HEIGHT + (SCREEN_HEIGHT - HUD_HEIGHT) / 2
         self.background_sprite = sp
+
+    def _draw_hero_gravestones(self) -> None:
+        """Render a gravestone + respawn countdown at each dead hero's home.
+
+        Kingdom Rush shows a clear marker when a hero is down so the
+        player can read the board at a glance. We also hide the hero's
+        faded body sprite (setting alpha to 0 on its texture frame) for
+        the duration so the hero doesn't appear to be lying there alive.
+        """
+        if not hasattr(self, "_grave_sprite"):
+            tex = load_texture("decor", "grave_0")
+            self._grave_sprite = arcade.Sprite()
+            self._grave_sprite.texture = tex
+        for hero in self.heroes:
+            if hero.alive:
+                # Make sure the hero is visible while alive.
+                hero.alpha = 255
+                continue
+            # Hide the body — gravestone carries the visual.
+            hero.alpha = 0
+            # Gravestone at the hero's home spot.
+            self._grave_sprite.center_x = hero._home_x
+            self._grave_sprite.center_y = hero._home_y - 4
+            arcade.draw_sprite(self._grave_sprite)
+            # Respawn countdown text sits above the stone.
+            key = f"_respawn_text_{id(hero)}"
+            txt = getattr(self, key, None)
+            if txt is None:
+                txt = arcade.Text(
+                    "", 0, 0, color=(252, 240, 200), font_size=12, bold=True,
+                    anchor_x="center", anchor_y="center",
+                )
+                setattr(self, key, txt)
+            rt = max(0.0, hero.respawn_timer)
+            txt.text = f"Respawn {rt:.0f}s"
+            txt.x = hero._home_x
+            txt.y = hero._home_y + 34
+            # Dark backing pill for legibility.
+            arcade.draw_lrbt_rectangle_filled(
+                txt.x - 50, txt.x + 50, txt.y - 10, txt.y + 10, (20, 20, 28, 200),
+            )
+            arcade.draw_lrbt_rectangle_outline(
+                txt.x - 50, txt.x + 50, txt.y - 10, txt.y + 10, (160, 120, 60), 1,
+            )
+            txt.draw()
 
     def _draw_rally_flags(self) -> None:
         """Rally flags for hero + every barracks, plus a subtle pulsing ring
@@ -239,10 +370,10 @@ class GameView(arcade.View):
                 hero._scene = self
                 self.units.append(hero)
             break
-        # Auto-select first hero so right-click works immediately.
+        # Register heroes with the HUD (portraits) + auto-select the first.
+        self.hud.set_heroes(self.heroes)
         if self.heroes:
-            self._selected_hero = self.heroes[0]
-            self.hud.set_selected_hero(self.heroes[0])
+            self._on_select_hero(self.heroes[0])
 
     # --- scene API for systems --------------------------------------
 
@@ -251,6 +382,7 @@ class GameView(arcade.View):
 
     def spawn_tower(self, tower, spot) -> None:
         self.towers.append(tower)
+        self._spot_by_tower[tower] = spot
         # Barracks: auto-place rally on the nearest *actual* path waypoint so
         # soldiers stand right on the lane enemies walk along.
         from td_game.entities.towers.barracks import Barracks
@@ -272,6 +404,16 @@ class GameView(arcade.View):
         return best
 
     def remove_tower(self, tower) -> None:
+        # Restore the build-spot sprite so the player can rebuild there.
+        spot = self._spot_by_tower.pop(tower, None)
+        if spot is not None:
+            tex = load_texture("tiles", "build_spot_0")
+            sp = arcade.Sprite()
+            sp.texture = tex
+            sp.center_x = spot.x
+            sp.center_y = spot.y
+            self.build_spot_sprites.append(sp)
+            self._spot_by_sprite[sp] = spot
         tower.remove_from_sprite_lists()
 
     def spawn_unit(self, unit) -> None:
@@ -281,14 +423,66 @@ class GameView(arcade.View):
     def spawn_projectile(self, proj) -> None:
         self.projectiles.append(proj)
 
-    def spawn_fx(self, sprite_name: str, x: float, y: float, lifetime: float = 0.4) -> None:
-        tex = load_texture("effects", sprite_name)
+    def spawn_fx(self, sprite_name: str, x: float, y: float, lifetime: float = 0.4,
+                 frames: int = 1, start_scale: float = 1.0, end_scale: float = 1.0) -> None:
+        """Spawn an FX sprite.
+
+        If `frames > 1`, the FX cycles through `<sprite_name_root>_0` ..
+        `..._{frames-1}` over `lifetime`. `sprite_name` can already
+        include the trailing index — we strip it.
+        """
+        # Derive the multi-frame base by trimming a trailing `_<int>`.
+        base = sprite_name
+        if "_" in sprite_name:
+            head, _, tail = sprite_name.rpartition("_")
+            if tail.isdigit():
+                base = head
+        if frames > 1:
+            textures = [load_texture("effects", f"{base}_{i}") for i in range(frames)]
+        else:
+            textures = [load_texture("effects", sprite_name)]
         sp = arcade.Sprite()
-        sp.texture = tex
+        sp.texture = textures[0]
         sp.center_x = x
         sp.center_y = y
+        sp.scale = (start_scale, start_scale)
         self.fx.append(sp)
-        self._fx_lifetimes[sp] = lifetime
+        self._fx_anims.append(_FxAnim(
+            sprite=sp, textures=textures, duration=lifetime,
+            start_scale=start_scale, end_scale=end_scale,
+        ))
+
+    def spawn_explosion(self, x: float, y: float, radius: float = 40) -> None:
+        """Dynamic cannon explosion — multi-frame blast + flying debris.
+
+        `radius` roughly controls how wide debris fans out. Scale-animates
+        the blast from small to blown-out, then contracts and fades.
+        """
+        # Multi-frame blast, scaling up then a touch back (growth + settle).
+        target_scale = radius / 32.0 + 0.4  # blast grows roughly with radius
+        self.spawn_fx("explosion", x, y, lifetime=0.55, frames=5,
+                      start_scale=0.5, end_scale=target_scale * 1.1)
+        # Debris chunks flying outward.
+        tex = load_texture("effects", "debris_0")
+        count = 10 + int(radius / 12)
+        for _ in range(count):
+            angle = random.uniform(0, math.tau)
+            speed = random.uniform(110, 200)
+            vx = math.cos(angle) * speed
+            vy = math.sin(angle) * speed + 40  # bias upward so they arc
+            sp = arcade.Sprite()
+            sp.texture = tex
+            sp.center_x = x + math.cos(angle) * 4
+            sp.center_y = y + math.sin(angle) * 4
+            sp.scale = (random.uniform(0.7, 1.4), random.uniform(0.7, 1.4))
+            self.fx.append(sp)
+            self._fx_particles.append(_FxParticle(
+                sprite=sp, vx=vx, vy=vy,
+                life=random.uniform(0.45, 0.75),
+            ))
+        # A trailing smoke puff that lingers after the blast.
+        self.spawn_fx("smoke", x, y, lifetime=0.9, frames=4,
+                      start_scale=target_scale * 0.6, end_scale=target_scale * 1.4)
 
     # --- control ---------------------------------------------------
 
@@ -326,6 +520,10 @@ class GameView(arcade.View):
         if self.wave_manager.can_call_next_early():
             return int(self.wave_manager.between_timer * 2) + 5
         return 0
+
+    def _on_enemy_killed_audio(self, bounty: int = 0, **_) -> None:
+        # Quiet click per kill so a wave clear sounds busy but not spammy.
+        audio.play_sfx("sfx_gold", 0.35 if bounty <= 10 else 0.55)
 
     def _on_wave_started(self, index: int, wave, **_) -> None:
         self._wave_banner = arcade.Text(
@@ -408,9 +606,7 @@ class GameView(arcade.View):
             dx = h.center_x - x
             dy = h.center_y - y
             if dx * dx + dy * dy <= 28 * 28:
-                self._selected_hero = h
-                self._selected_tower = None
-                self.hud.set_selected_hero(h)
+                self._on_select_hero(h)
                 return
 
         # Tower?
@@ -484,10 +680,12 @@ class GameView(arcade.View):
     def _select_hero_by_index(self, idx: int) -> None:
         if idx < 0 or idx >= len(self.heroes):
             return
-        h = self.heroes[idx]
-        self._selected_hero = h
+        self._on_select_hero(self.heroes[idx])
+
+    def _on_select_hero(self, hero) -> None:
+        self._selected_hero = hero
         self._selected_tower = None
-        self.hud.set_selected_hero(h)
+        self.hud.set_selected_hero(hero)
 
     def _on_skill_button(self, skill) -> None:
         if not skill.ready:
@@ -531,6 +729,10 @@ class GameView(arcade.View):
             if self._first_wave_timer <= 0:
                 self.wave_manager.start_next_wave()
 
+        # Tick global-skill cooldowns. Hero skills tick inside BaseHero.
+        self.reinforcements.update(dt)
+        self.meteor.update(dt)
+
         self.spawner.update_followers([e for e in self.enemies if e.alive], dt)
 
         for sprite_list in (self.enemies, self.units, self.towers, self.projectiles):
@@ -564,11 +766,16 @@ class GameView(arcade.View):
                 if u.anim is None or u.anim.finished:
                     u.remove_from_sprite_lists()
 
-        for sp in list(self._fx_lifetimes.keys()):
-            self._fx_lifetimes[sp] -= dt
-            if self._fx_lifetimes[sp] <= 0:
-                sp.remove_from_sprite_lists()
-                del self._fx_lifetimes[sp]
+        # Animated FX (frame cycle + scale + fade).
+        for anim in list(self._fx_anims):
+            if anim.tick(dt):
+                anim.sprite.remove_from_sprite_lists()
+                self._fx_anims.remove(anim)
+        # Debris particles (velocity + gravity + spin + fade).
+        for p in list(self._fx_particles):
+            if p.tick(dt):
+                p.sprite.remove_from_sprite_lists()
+                self._fx_particles.remove(p)
 
         active_count = sum(1 for e in self.enemies if e.alive)
         self.wave_manager.update(dt, active_count)
@@ -634,6 +841,9 @@ class GameView(arcade.View):
                 (252, 232, 140, int(200 + pulse * 40)), 2,
             )
 
+        # Gravestone marker + respawn countdown for dead heroes.
+        self._draw_hero_gravestones()
+
         for e in self.enemies:
             draw_health_bar(e)
         for u in self.units:
@@ -650,18 +860,6 @@ class GameView(arcade.View):
 
         if self._selected_menu is not None:
             self._selected_menu.draw()
-
-        if self._pending_rally_barracks is not None:
-            self._target_prompt.draw()
-            # Preview flag at cursor + a dashed line from the barracks.
-            arcade.draw_line(
-                self._pending_rally_barracks.center_x, self._pending_rally_barracks.center_y,
-                self._mouse_x, self._mouse_y,
-                (250, 210, 110, 180), 2,
-            )
-            self._barracks_flag_sprite.center_x = self._mouse_x
-            self._barracks_flag_sprite.center_y = self._mouse_y + 14
-            arcade.draw_sprite(self._barracks_flag_sprite)
 
         if self._pending_skill is not None:
             self._target_prompt.draw()

@@ -59,18 +59,23 @@ class Barracks(BaseTower):
         angle = (idx / count) * math.tau
         offset_x = math.cos(angle) * 18
         offset_y = math.sin(angle) * 18
+        # Tier -> sprite set: makes an upgraded barracks visibly stronger.
+        # tier_index is 0 for tier 1, 1 for tier 2, 2 for tier 3. Spec is tier 4.
+        if self.current_spec is not None:
+            sprite_base = "soldier"   # tier-4 spec — same visual as tier 3 for now
+        elif self.current_tier_index >= 2:
+            sprite_base = "soldier"   # tier 3
+        else:
+            sprite_base = "footman"   # tier 1-2
         soldier = Soldier(
-            # Spawn at the tower, they'll walk to rally on their own.
             self.center_x,
             self.center_y,
             barracks=self,
             max_hp=float(extras.get("unit_hp", 60)),
-            # Data 'row.damage' is the tower-level number (used elsewhere);
-            # soldier per-hit damage needs to scale up so a barracks actually
-            # out-damages the basic goblin dps in melee.
             damage=max(12.0, row.damage * 3.0),
-            attack_interval=1.0,  # tight swings; `row.attack_interval` was the tower's idle beat
+            attack_interval=1.0,
             armor=float(extras.get("armor", 0.0)),
+            sprite_base=sprite_base,
         )
         soldier.set_rally(self.rally_x + offset_x, self.rally_y + offset_y)
         self.soldiers.append(soldier)
@@ -83,3 +88,14 @@ class Barracks(BaseTower):
         for i, s in enumerate(self.soldiers):
             angle = (i / count) * math.tau
             s.set_rally(x + math.cos(angle) * 18, y + math.sin(angle) * 18)
+
+    def sell(self) -> int:
+        # Also dispatch the soldiers so they don't linger after the barracks
+        # is gone. Their death anim plays and they're culled by the scene.
+        refund = super().sell()
+        for s in self.soldiers:
+            if s.alive:
+                s.hp = 0
+                s.on_death()
+        self.soldiers.clear()
+        return refund

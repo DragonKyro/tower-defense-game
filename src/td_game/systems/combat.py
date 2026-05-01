@@ -3,7 +3,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from td_game.entities.projectiles.base_projectile import ArcProjectile, HomingProjectile, StraightProjectile
+from td_game.entities.projectiles.base_projectile import (
+    ArcProjectile,
+    ArcToTargetProjectile,
+    FallingProjectile,
+    HomingProjectile,
+    StraightProjectile,
+)
 
 from . import collision
 
@@ -56,15 +62,17 @@ class CombatSystem:
     def tick_projectiles(self, projectiles, enemies, scene) -> None:
         for p in list(projectiles):
             if p.dead:
-                # Arc projectiles resolve their splash on impact *before* being
-                # culled. Previously the cull ran first and the AoE never fired.
-                if isinstance(p, ArcProjectile) and p.aoe_radius > 0 \
-                        and not getattr(p, "_aoe_resolved", False):
+                # Any projectile that carries an `aoe_radius` resolves a
+                # splash on impact (cannons, meteors). Single-target
+                # projectiles (arrows, magic bolts) already applied their
+                # damage inside `on_impact` and just need culling.
+                aoe = getattr(p, "aoe_radius", 0.0)
+                if aoe > 0 and not getattr(p, "_aoe_resolved", False):
                     p._aoe_resolved = True
-                    for e in collision.in_radius(p.center_x, p.center_y, p.aoe_radius, enemies):
+                    for e in collision.in_radius(p.center_x, p.center_y, aoe, enemies):
                         e.take_damage(p.packet)
-                    if scene is not None:
-                        scene.spawn_fx("explosion_0", p.center_x, p.center_y, lifetime=0.45)
+                    if scene is not None and hasattr(scene, "spawn_explosion"):
+                        scene.spawn_explosion(p.center_x, p.center_y, radius=aoe)
                 p.remove_from_sprite_lists()
                 continue
             # Straight & homing: hit test on overlap.

@@ -10,6 +10,8 @@ from ..base_skill import BaseSkill, SkillContext, TargetKind
 class ShieldBash(BaseSkill):
     id = "shield_bash"
     display_name = "Shield Bash"
+    description = "Slam blocked enemies for double damage and stun them for 1.5s."
+    icon = "shieldbash_0"
     target_kind = TargetKind.SELF
 
     def __init__(self) -> None:
@@ -28,6 +30,8 @@ class ShieldBash(BaseSkill):
 class Rally(BaseSkill):
     id = "rally"
     display_name = "Rally"
+    description = "Heal 35% of max HP and gain +4 armor."
+    icon = "rally_0"
     target_kind = TargetKind.SELF
 
     def __init__(self) -> None:
