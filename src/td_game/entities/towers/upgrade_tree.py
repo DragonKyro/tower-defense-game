@@ -23,6 +23,7 @@ class TowerStatsRow:
     attack_interval: float   # seconds
     projectile: str = ""     # sprite key in 'projectiles' category (if ranged)
     sprite: str = ""         # tower sprite
+    description: str = ""    # one-liner flavor; shown in tooltips
     # Optional bonuses per row (structured as key->value so data can grow
     # without widening this dataclass every time).
     extras: dict = field(default_factory=dict)

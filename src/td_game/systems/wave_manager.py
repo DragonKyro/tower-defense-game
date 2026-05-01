@@ -49,6 +49,39 @@ class WaveManager:
     def bind(self, scene) -> None:
         self.scene = scene
 
+    # --- queries -----------------------------------------------------
+
+    @property
+    def current_wave_index(self) -> int:
+        return self._wave_index
+
+    def next_wave(self) -> "Wave | None":
+        idx = self._wave_index + 1
+        if idx < len(self.waves):
+            return self.waves[idx]
+        return None
+
+    @property
+    def between_timer(self) -> float:
+        """Seconds remaining in the inter-wave breather (0 if not in BETWEEN)."""
+        return max(0.0, self._between_timer) if self.phase is WaveState.BETWEEN else 0.0
+
+    def can_call_next_early(self) -> bool:
+        return self.phase is WaveState.BETWEEN and self.next_wave() is not None
+
+    def call_next_wave_early(self) -> int:
+        """Skip the inter-wave timer and start the next wave immediately.
+
+        Returns a gold bonus proportional to the skipped time (KR-style).
+        Caller is responsible for adding the gold to `state`.
+        """
+        if not self.can_call_next_early():
+            return 0
+        bonus = int(self._between_timer * 2) + 5  # flat + proportional
+        self._between_timer = 0.0
+        self.start_next_wave()
+        return bonus
+
     # --- control -----------------------------------------------------
 
     def start_next_wave(self) -> None:

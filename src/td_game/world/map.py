@@ -1,4 +1,4 @@
-"""Map: grid of Tiles + paths + build spots + metadata.
+"""Map: grid of Tiles + paths + build spots + decor + metadata.
 
 A Map is pure data. It does not own sprites, entities, or game state.
 Scenes consume a Map to initialize a gameplay session.
@@ -27,6 +27,19 @@ class BuildSpot:
     allowed_families: frozenset[str] = frozenset()
 
 
+@dataclass(frozen=True)
+class DecorItem:
+    """A purely decorative sprite placed on the map.
+
+    `sprite` is a key in the 'decor' resource category (e.g. 'tree_oak').
+    `scale` optionally overrides the rendered size. Decor is non-interactive.
+    """
+    x: float
+    y: float
+    sprite: str
+    scale: float = 1.0
+
+
 @dataclass
 class Map:
     name: str
@@ -35,6 +48,7 @@ class Map:
     build_spots: list[BuildSpot] = field(default_factory=list)
     spawn_points: dict[str, tuple[float, float]] = field(default_factory=dict)  # path_id -> (x,y)
     exit_points: dict[str, tuple[float, float]] = field(default_factory=dict)
+    decor: list[DecorItem] = field(default_factory=list)
     background: str | None = None  # optional pre-rendered background sprite name
 
     def in_bounds(self, col: int, row: int) -> bool:

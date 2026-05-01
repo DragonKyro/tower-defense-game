@@ -38,6 +38,8 @@ class SkillContext:
 class BaseSkill:
     id: str = "skill"
     display_name: str = "Skill"
+    description: str = ""
+    icon: str = ""           # sprite key in 'skills' category ('' => fall back to text label)
     target_kind: TargetKind = TargetKind.SELF
 
     def __init__(self, cooldown: float = 10.0, cost: int = 0) -> None:

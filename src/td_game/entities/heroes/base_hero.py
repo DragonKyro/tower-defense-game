@@ -29,9 +29,11 @@ class HeroStats:
     speed: float = 90.0
     armor: float = 0.0
     magic_resist: float = 0.0
-    engage_radius: float = 40.0
+    engage_radius: float = 48.0
+    aggression_radius: float = 140.0
     xp_curve: tuple[int, ...] = (50, 130, 240, 400, 620, 900, 1260, 1700, 2220)
-    sprite: str = "knight"
+    sprite_base: str = "knight"
+    description: str = ""
 
 
 class BaseHero(BaseUnit):
@@ -51,6 +53,7 @@ class BaseHero(BaseUnit):
             attack_interval=stats.attack_interval,
             block_slots=1,
             engage_radius=stats.engage_radius,
+            aggression_radius=stats.aggression_radius,
         )
         self.stats = stats
         self.speed = stats.speed

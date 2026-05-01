@@ -1,18 +1,18 @@
-"""Minimal clickable button.
+"""Clickable button with hover state and cached text.
 
-Arcade has its own GUI stack (`arcade.gui`) but its API drifted between
-releases; we roll a tiny one here to avoid coupling to a specific arcade
-minor version. Swap to arcade.gui later if desired.
+Uses `arcade.Text` (not `draw_text`) for GPU-cached rendering.
+Hover state is driven by `update_hover(x, y)` called from the scene's
+`on_mouse_motion` handler.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 import arcade
 
 
-@dataclass
+@dataclass(eq=False)
 class Button:
     x: float
     y: float
@@ -21,6 +21,47 @@ class Button:
     label: str
     on_click: Callable[[], None]
     enabled: bool = True
+    hotkey: str | None = None
+    icon: arcade.Texture | None = None   # if set, drawn centered (scaled to fit)
+
+    # internal
+    hovered: bool = field(default=False, init=False)
+    _text: arcade.Text | None = field(default=None, init=False, repr=False)
+    _hotkey_text: arcade.Text | None = field(default=None, init=False, repr=False)
+    _icon_sprite: arcade.Sprite | None = field(default=None, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        # If an icon texture is provided, only render it (no label text).
+        if self.icon is not None:
+            sp = arcade.Sprite()
+            sp.texture = self.icon
+            # Fit icon into (width - 10) x (height - 10) leaving room for hotkey.
+            pad = 8
+            target = min(self.width - pad, self.height - pad)
+            scale = target / max(self.icon.width, self.icon.height)
+            sp.scale = (scale, scale)
+            sp.center_x = self.x
+            sp.center_y = self.y
+            self._icon_sprite = sp
+        else:
+            self._text = arcade.Text(
+                self.label, self.x, self.y,
+                color=(240, 236, 228),
+                font_size=14,
+                anchor_x="center",
+                anchor_y="center",
+                multiline=False,
+                align="center",
+            )
+        if self.hotkey:
+            self._hotkey_text = arcade.Text(
+                f"[{self.hotkey}]",
+                self.x + self.width / 2 - 4, self.y - self.height / 2 + 4,
+                color=(220, 210, 170), font_size=9, bold=True,
+                anchor_x="right", anchor_y="baseline",
+            )
+
+    # ---- geometry ---------------------------------------------------
 
     def contains(self, px: float, py: float) -> bool:
         return (
@@ -28,26 +69,68 @@ class Button:
             and self.y - self.height / 2 <= py <= self.y + self.height / 2
         )
 
+    def update_hover(self, px: float, py: float) -> None:
+        self.hovered = self.enabled and self.contains(px, py)
+
     def click(self, px: float, py: float) -> bool:
         if self.enabled and self.contains(px, py):
             self.on_click()
             return True
         return False
 
+    def set_label(self, text: str) -> None:
+        if text != self.label:
+            self.label = text
+            if self._text is not None:
+                self._text.text = text
+
+    def set_enabled(self, enabled: bool) -> None:
+        self.enabled = enabled
+        if not enabled:
+            self.hovered = False
+
+    # ---- draw -------------------------------------------------------
+
     def draw(self) -> None:
-        bg = (60, 60, 72) if self.enabled else (40, 40, 48)
-        arcade.draw_lrbt_rectangle_filled(
-            self.x - self.width / 2, self.x + self.width / 2,
-            self.y - self.height / 2, self.y + self.height / 2,
-            bg,
-        )
-        arcade.draw_lrbt_rectangle_outline(
-            self.x - self.width / 2, self.x + self.width / 2,
-            self.y - self.height / 2, self.y + self.height / 2,
-            (200, 200, 220), 2,
-        )
-        arcade.draw_text(
-            self.label, self.x, self.y,
-            (235, 235, 240), 14,
-            anchor_x="center", anchor_y="center",
-        )
+        left = self.x - self.width / 2
+        right = self.x + self.width / 2
+        bottom = self.y - self.height / 2
+        top = self.y + self.height / 2
+
+        if not self.enabled:
+            bg = (34, 34, 42)
+            border = (80, 80, 90)
+            text_color = (120, 116, 110)
+        elif self.hovered:
+            bg = (92, 102, 128)
+            border = (240, 214, 136)
+            text_color = (255, 250, 232)
+        else:
+            bg = (52, 56, 72)
+            border = (160, 160, 180)
+            text_color = (240, 236, 228)
+
+        # Soft shadow beneath.
+        arcade.draw_lrbt_rectangle_filled(left + 2, right + 2, bottom - 3, top - 3, (0, 0, 0, 120))
+        # Body.
+        arcade.draw_lrbt_rectangle_filled(left, right, bottom, top, bg)
+        # Top highlight band.
+        arcade.draw_lrbt_rectangle_filled(left, right, top - 4, top, (255, 255, 255, 30))
+        # Border.
+        arcade.draw_lrbt_rectangle_outline(left, right, bottom, top, border, 2)
+
+        if self._icon_sprite is not None:
+            self._icon_sprite.center_x = self.x
+            self._icon_sprite.center_y = self.y
+            # Darken when disabled (approximate via an overlay).
+            arcade.draw_sprite(self._icon_sprite)
+            if not self.enabled:
+                arcade.draw_lrbt_rectangle_filled(left, right, bottom, top, (0, 0, 0, 140))
+        elif self._text is not None:
+            if self._text.color != text_color:
+                self._text.color = text_color
+            self._text.x = self.x
+            self._text.y = self.y
+            self._text.draw()
+        if self._hotkey_text is not None:
+            self._hotkey_text.draw()

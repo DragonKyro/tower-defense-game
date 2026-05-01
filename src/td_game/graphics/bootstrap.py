@@ -7,7 +7,16 @@ from __future__ import annotations
 
 from td_game.core.resources import register_generator
 
-from .procedural import effect_gen, enemy_gen, hero_gen, projectile_gen, tile_gen, tower_gen
+from .procedural import (
+    decor_gen,
+    effect_gen,
+    enemy_gen,
+    hero_gen,
+    projectile_gen,
+    skill_gen,
+    tile_gen,
+    tower_gen,
+)
 
 
 def register_all() -> None:
@@ -17,3 +26,5 @@ def register_all() -> None:
     register_generator("heroes", hero_gen.generate)
     register_generator("projectiles", projectile_gen.generate)
     register_generator("effects", effect_gen.generate)
+    register_generator("decor", decor_gen.generate)
+    register_generator("skills", skill_gen.generate)

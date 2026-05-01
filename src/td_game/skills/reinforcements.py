@@ -11,6 +11,8 @@ from .base_skill import BaseSkill, SkillContext, TargetKind
 class Reinforcements(BaseSkill):
     id = "reinforcements"
     display_name = "Reinforcements"
+    description = "Summons two temporary soldiers at the chosen point. They block enemies for about 12 seconds."
+    icon = "reinforcements_0"
     target_kind = TargetKind.POINT
 
     def __init__(self, cooldown: float = 15.0, cost: int = 0, count: int = 2) -> None:

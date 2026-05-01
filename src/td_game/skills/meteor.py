@@ -11,6 +11,8 @@ from .base_skill import BaseSkill, SkillContext, TargetKind
 class Meteor(BaseSkill):
     id = "meteor"
     display_name = "Meteor"
+    description = "Drops a blazing meteor on the target area. Massive fire damage in a wide radius."
+    icon = "meteor_0"
     target_kind = TargetKind.AREA
 
     def __init__(self, cooldown: float = 25.0, cost: int = 0, damage: float = 220.0, radius: float = 90.0) -> None:

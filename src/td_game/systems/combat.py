@@ -18,14 +18,24 @@ class CombatSystem:
     # --- engagement -------------------------------------------------
 
     def resolve_engagement(self, units, enemies) -> None:
-        """Pair unengaged enemies with the nearest unit that has a free block slot."""
+        """Pair unengaged enemies with the nearest unit that has a free block slot.
+
+        If the original blocker died, allow a new unit to pick up the enemy
+        so it doesn't resume walking mid-brawl.
+        """
         for enemy in enemies:
             if not enemy.alive or enemy.stunned:
                 continue
-            # If already being blocked, nothing to do.
-            already = any(enemy in u.blocking for u in units)
-            if already:
+            # If any *living* unit is blocking this enemy, leave it alone.
+            already_live = any(enemy in u.blocking and u.alive for u in units)
+            if already_live:
                 continue
+            # Clean stale references held by dead units.
+            for u in units:
+                if enemy in u.blocking and not u.alive:
+                    u.blocking.remove(enemy)
+            if enemy.engaged_by is not None and not enemy.engaged_by.alive:
+                enemy.engaged_by = None
             # Find nearest unit in engage_radius with a slot.
             best = None
             best_d2 = float("inf")

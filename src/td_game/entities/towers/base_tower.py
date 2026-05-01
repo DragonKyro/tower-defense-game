@@ -42,7 +42,7 @@ class BaseTower(Entity):
         self.current_tier_index = 0
         self.current_spec: Optional[str] = None
         row = tree.tiers[0]
-        tex = load_texture("towers", row.sprite or f"{self.family}_1")
+        tex = load_texture("towers", self._sprite_key_for(row, tier_index=0))
         super().__init__(tex, x, y, max_hp=1e9)  # effectively indestructible
         self.damage = row.damage
         self.range = row.range
@@ -52,8 +52,33 @@ class BaseTower(Entity):
         self.total_invested: int = row.cost
         self.bus = bus
         self._row: TowerStatsRow = row
+        self.anim = self._build_anim(tier_index=0)
         if bus is not None:
             bus.publish(TOWER_BUILT, tower=self)
+
+    def _sprite_key_for(self, row: TowerStatsRow, tier_index: int) -> str:
+        """Return a short key for the current look, e.g. 'archer_2'."""
+        tier_num = (tier_index + 1) if self.current_spec is None else 4
+        return f"{self.family}_{tier_num}"
+
+    def _build_anim(self, tier_index: int):
+        """Set up idle/attack animations for this tier. Subclasses may override."""
+        from td_game.core.resources import load_animation_frames
+        from td_game.graphics.animation import Animation, LoopMode
+        from td_game.graphics.anim_controller import AnimationController, AnimState
+        base = self._sprite_key_for(self._row, tier_index) if hasattr(self, "_row") else f"{self.family}_{tier_index+1}"
+        idle = Animation(
+            frames=load_animation_frames("towers", f"{base}_idle", 2),
+            frame_duration=0.5, loop=LoopMode.PING_PONG,
+        )
+        attack = Animation(
+            frames=load_animation_frames("towers", f"{base}_attack", 3),
+            frame_duration=0.08, loop=LoopMode.ONCE,
+        )
+        return AnimationController(
+            states={AnimState.IDLE: idle, AnimState.ATTACK: attack},
+            initial=AnimState.IDLE,
+        )
 
     # --- rows / upgrades ---------------------------------------------
 
@@ -62,8 +87,9 @@ class BaseTower(Entity):
         self.damage = row.damage
         self.range = row.range
         self.attack_interval = row.attack_interval
-        if row.sprite:
-            self.texture = load_texture("towers", row.sprite)
+        # Rebuild animation for the new tier's look.
+        self.anim = self._build_anim(tier_index=self.current_tier_index)
+        self.texture = load_texture("towers", self._sprite_key_for(row, self.current_tier_index))
 
     def next_upgrades(self) -> list[tuple[str, TowerStatsRow]]:
         return self.tree.next_upgrades(self.current_tier_index, self.current_spec)
@@ -95,6 +121,10 @@ class BaseTower(Entity):
     # --- per-frame --------------------------------------------------
 
     def on_update(self, dt: float) -> None:
+        # Drop back to idle when an attack clip has played out.
+        if self.anim is not None and self.anim.finished:
+            from td_game.graphics.anim_controller import AnimState
+            self.anim.set_state(AnimState.IDLE)
         super().on_update(dt)
         if self._cooldown > 0:
             self._cooldown -= dt
@@ -111,6 +141,9 @@ class BaseTower(Entity):
             return False
         self.perform_attack(target, scene)
         self._cooldown = self.attack_interval
+        if self.anim is not None:
+            from td_game.graphics.anim_controller import AnimState
+            self.anim.set_state(AnimState.ATTACK, force=True)
         return True
 
     def perform_attack(self, target: "BaseEnemy", scene) -> None:

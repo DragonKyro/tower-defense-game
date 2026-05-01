@@ -30,6 +30,9 @@ class PathFollower:
     def update(self, enemy: "BaseEnemy", dt: float) -> None:
         if not enemy.alive or enemy.current_path is None:
             return
+        # Locked in melee — stand and fight instead of walking past.
+        if enemy.engaged_by is not None and getattr(enemy.engaged_by, "alive", False):
+            return
         path = enemy.current_path
         step = enemy.speed * dt
         if step <= 0:
@@ -60,3 +63,8 @@ class PathFollower:
                 enemy.center_x += dx / dist * remaining
                 enemy.center_y += dy / dist * remaining
                 remaining = 0
+            # Facing: request a horizontal flip; Entity smooths it over a few frames.
+            if dx < -0.1:
+                enemy.face(-1)
+            elif dx > 0.1:
+                enemy.face(1)
