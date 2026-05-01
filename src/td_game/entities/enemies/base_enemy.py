@@ -75,6 +75,11 @@ class BaseEnemy(Entity):
                 self.engaged_by.take_damage(
                     DamagePacket(self.stats.melee_damage, DamageType.PHYSICAL, source=self)
                 )
+                scene = getattr(self.engaged_by, "_scene", None)
+                if scene is not None:
+                    scene.spawn_fx("hit_0",
+                                   self.engaged_by.center_x,
+                                   self.engaged_by.center_y + 4, lifetime=0.18)
                 self._attack_cd = self.stats.melee_interval
                 # Face the target smoothly.
                 if self.engaged_by.center_x < self.center_x - 0.1:

@@ -192,6 +192,6 @@ LEVEL_01 = LevelDef(
     waves=_build_waves(),
     starting_gold=220,
     starting_lives=20,
-    hero_slots=1,
+    hero_slots=2,
     tags=frozenset({"tutorial"}),
 )

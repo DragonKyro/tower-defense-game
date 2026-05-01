@@ -19,8 +19,8 @@ def _build_anim_controller(base: str) -> AnimationController:
                      frame_duration=0.45, loop=LoopMode.PING_PONG)
     walk = Animation(frames=load_animation_frames("enemies", f"{base}_walk", 6),
                      frame_duration=0.09, loop=LoopMode.LOOP)
-    death = Animation(frames=[load_texture("enemies", f"{base}_death_0")],
-                      frame_duration=0.5, loop=LoopMode.ONCE)
+    death = Animation(frames=load_animation_frames("enemies", f"{base}_death", 4),
+                      frame_duration=0.14, loop=LoopMode.ONCE)
     return AnimationController(
         states={AnimState.IDLE: idle, AnimState.WALK: walk, AnimState.DEATH: death},
         initial=AnimState.WALK,

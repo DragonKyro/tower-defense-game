@@ -5,6 +5,8 @@ wave manager -> spawner followers -> tower attacks -> projectiles -> combat.
 """
 from __future__ import annotations
 
+import math
+
 import arcade
 
 from td_game.core.constants import (
@@ -33,7 +35,7 @@ from td_game.ui.tooltip import InfoPanel, enemy_panel, tower_panel
 from td_game.ui.tower_menu import BuildMenu, UpgradeMenu
 from td_game.ui.wave_preview import WavePreview
 from td_game.world.level import LevelDef
-from td_game.world.path_geometry import smooth_waypoints
+from td_game.world.path_geometry import nearest_point_on_curves, smooth_waypoints
 
 
 class GameView(arcade.View):
@@ -64,6 +66,11 @@ class GameView(arcade.View):
         self._fx_lifetimes: dict = {}
         self._selected_menu = None
         self._pending_skill = None   # skill awaiting a target
+        self._pending_skill_hero = None  # hero casting a targeted skill (if any)
+        # Selection: which thing the player last clicked. Right-click then
+        # acts on this selection — moves the hero, or rallies the barracks.
+        self._selected_hero = None
+        self._selected_tower = None
         self._mouse_x = 0
         self._mouse_y = 0
 
@@ -87,6 +94,7 @@ class GameView(arcade.View):
             on_cast=self._on_skill_button,
             on_pause=self._toggle_pause,
             on_speed_toggle=self._toggle_speed,
+            on_cast_hero=self._on_hero_skill,
         )
         self.wave_preview = WavePreview(on_call_early=self._call_next_wave_early)
 
@@ -120,6 +128,51 @@ class GameView(arcade.View):
         # Play area is the region above HUD_HEIGHT.
         sp.center_y = HUD_HEIGHT + (SCREEN_HEIGHT - HUD_HEIGHT) / 2
         self.background_sprite = sp
+
+    def _draw_rally_flags(self) -> None:
+        """Rally flags for hero + every barracks, plus a subtle pulsing ring
+        so the player always knows the rally spots are interactive.
+        """
+        if not hasattr(self, "_hero_flag_sprite"):
+            tex = load_texture("decor", "rallyflag_hero")
+            self._hero_flag_sprite = arcade.Sprite()
+            self._hero_flag_sprite.texture = tex
+            self._hero_flag_sprite.scale = (1.1, 1.1)
+        if not hasattr(self, "_barracks_flag_sprite"):
+            tex = load_texture("decor", "rallyflag_0")
+            self._barracks_flag_sprite = arcade.Sprite()
+            self._barracks_flag_sprite.texture = tex
+            self._barracks_flag_sprite.scale = (1.1, 1.1)
+
+        # Subtle pulse driven by wall-clock time (safe even when paused).
+        import time
+        pulse = 0.5 + 0.5 * math.sin(time.perf_counter() * 2.0)
+
+        for hero in self.heroes:
+            if not hero.alive:
+                continue
+            # Flag sits at the rally point so the user can see exactly
+            # where the hero is heading. Gold ring pulses to indicate
+            # "this is controllable — right-click to move".
+            arcade.draw_circle_outline(
+                hero.rally_x, hero.rally_y, 16 + pulse * 4,
+                (248, 220, 120, int(160 * (0.4 + pulse * 0.6))), 2,
+            )
+            self._hero_flag_sprite.center_x = hero.rally_x + 2
+            self._hero_flag_sprite.center_y = hero.rally_y + 16
+            arcade.draw_sprite(self._hero_flag_sprite)
+
+        from td_game.entities.towers.barracks import Barracks
+        for t in self.towers:
+            if not isinstance(t, Barracks):
+                continue
+            arcade.draw_circle_outline(
+                t.rally_x, t.rally_y, 14 + pulse * 3,
+                (220, 80, 80, int(140 * (0.4 + pulse * 0.6))), 2,
+            )
+            self._barracks_flag_sprite.center_x = t.rally_x + 2
+            self._barracks_flag_sprite.center_y = t.rally_y + 16
+            arcade.draw_sprite(self._barracks_flag_sprite)
 
     def _draw_path_ribbon(self, points, width: float, color) -> None:
         """Draw a smooth thick ribbon through `points`.
@@ -176,12 +229,20 @@ class GameView(arcade.View):
     def _place_default_hero(self) -> None:
         if self._hero_slots_available <= 0:
             return
+        defaults = ("knight", "ranger")
         for _, (sx, sy) in self.level.map.spawn_points.items():
-            hero = HEROES["knight"](sx + 128, sy, bus=self.state.bus)
-            self.heroes.append(hero)
-            hero._scene = self
-            self.units.append(hero)
+            for i in range(self._hero_slots_available):
+                hid = defaults[i % len(defaults)]
+                # Stagger placement so the heroes don't overlap.
+                hero = HEROES[hid](sx + 128 + i * 48, sy + (i - 0.5) * 24, bus=self.state.bus)
+                self.heroes.append(hero)
+                hero._scene = self
+                self.units.append(hero)
             break
+        # Auto-select first hero so right-click works immediately.
+        if self.heroes:
+            self._selected_hero = self.heroes[0]
+            self.hud.set_selected_hero(self.heroes[0])
 
     # --- scene API for systems --------------------------------------
 
@@ -190,6 +251,25 @@ class GameView(arcade.View):
 
     def spawn_tower(self, tower, spot) -> None:
         self.towers.append(tower)
+        # Barracks: auto-place rally on the nearest *actual* path waypoint so
+        # soldiers stand right on the lane enemies walk along.
+        from td_game.entities.towers.barracks import Barracks
+        if isinstance(tower, Barracks):
+            rx, ry = self._nearest_waypoint(tower.center_x, tower.center_y)
+            tower.set_rally(rx, ry)
+
+    def _nearest_waypoint(self, x: float, y: float) -> tuple[float, float]:
+        best = (x, y)
+        best_d2 = float("inf")
+        for path in self.level.map.paths:
+            for wp in path.waypoints:
+                dx = wp.x - x
+                dy = wp.y - y
+                d2 = dx * dx + dy * dy
+                if d2 < best_d2:
+                    best = (wp.x, wp.y)
+                    best_d2 = d2
+        return best
 
     def remove_tower(self, tower) -> None:
         tower.remove_from_sprite_lists()
@@ -268,6 +348,7 @@ class GameView(arcade.View):
         if symbol == arcade.key.ESCAPE:
             if self._pending_skill is not None:
                 self._pending_skill = None
+                self._pending_skill_hero = None
                 self._target_prompt.text = ""
                 return
             self._toggle_pause()
@@ -283,28 +364,54 @@ class GameView(arcade.View):
         elif symbol == arcade.key.W:
             if self.meteor.ready:
                 self._on_skill_button(self.meteor)
+        elif symbol == arcade.key.KEY_1:
+            self._select_hero_by_index(0)
+        elif symbol == arcade.key.KEY_2:
+            self._select_hero_by_index(1)
+        elif symbol in (arcade.key.KEY_3, arcade.key.KEY_4):
+            # 3/4 trigger selected hero's skills 1 and 2.
+            idx = 0 if symbol == arcade.key.KEY_3 else 1
+            if self._selected_hero and idx < len(self._selected_hero.skills):
+                self._on_hero_skill(self._selected_hero.skills[idx], self._selected_hero)
 
     def on_mouse_press(self, x: float, y: float, button, modifiers) -> None:
         if y < HUD_HEIGHT and self.hud.handle_click(x, y):
             return
         if self.wave_preview.handle_click(x, y):
             return
+
+        # Skill targeting always consumes the next click.
+        if self._pending_skill is not None:
+            skill = self._pending_skill
+            hero = self._pending_skill_hero
+            self._pending_skill = None
+            self._pending_skill_hero = None
+            self._target_prompt.text = ""
+            self.command.cast_skill(skill, target=(x, y), hero=hero)
+            return
+
+        if button == arcade.MOUSE_BUTTON_RIGHT:
+            self._handle_right_click(x, y)
+            return
+
+        # Left-click from here on. Menu click takes priority.
         if self._selected_menu is not None:
             if self._selected_menu.handle_click(x, y):
                 self._selected_menu = None
                 return
             self._selected_menu = None
 
-        if self._pending_skill is not None:
-            skill = self._pending_skill
-            self._pending_skill = None
-            self._target_prompt.text = ""
-            self.command.cast_skill(skill, target=(x, y))
-            return
-
-        if button == arcade.MOUSE_BUTTON_RIGHT and self.heroes:
-            self.command.set_hero_rally(self.heroes[0], x, y)
-            return
+        # Select hero?
+        for h in self.heroes:
+            if not h.alive:
+                continue
+            dx = h.center_x - x
+            dy = h.center_y - y
+            if dx * dx + dy * dy <= 28 * 28:
+                self._selected_hero = h
+                self._selected_tower = None
+                self.hud.set_selected_hero(h)
+                return
 
         # Tower?
         for t in self.towers:
@@ -316,6 +423,7 @@ class GameView(arcade.View):
                     on_upgrade=self._on_upgrade_picked,
                     on_sell=self._on_sell,
                 )
+                self._selected_tower = t
                 return
 
         # Build spot?
@@ -329,6 +437,32 @@ class GameView(arcade.View):
                     allowed=self.level.allowed_towers,
                     on_pick=self._on_family_picked,
                 )
+                return
+
+        # Click on empty ground — clear tower selection but keep hero selection.
+        self._selected_tower = None
+
+    def _handle_right_click(self, x: float, y: float) -> None:
+        """Right-click: rally selected barracks, else move selected hero.
+
+        One-click barracks rally: if the last-clicked tower is a barracks,
+        right-clicking anywhere on the map sets its rally.
+        """
+        from td_game.entities.towers.barracks import Barracks
+        if isinstance(self._selected_tower, Barracks) and self._selected_tower.alive:
+            self._selected_tower.set_rally(x, y)
+            return
+        if self._selected_hero is not None and self._selected_hero.alive:
+            self._selected_hero.disengage()
+            self.command.set_hero_rally(self._selected_hero, x, y)
+            return
+        # Fallback: pick first living hero.
+        for h in self.heroes:
+            if h.alive:
+                self._selected_hero = h
+                self.hud.set_selected_hero(h)
+                h.disengage()
+                self.command.set_hero_rally(h, x, y)
                 return
 
     # --- menu callbacks --------------------------------------------
@@ -347,6 +481,14 @@ class GameView(arcade.View):
     def _on_sell(self, tower) -> None:
         self.command.sell_tower(tower)
 
+    def _select_hero_by_index(self, idx: int) -> None:
+        if idx < 0 or idx >= len(self.heroes):
+            return
+        h = self.heroes[idx]
+        self._selected_hero = h
+        self._selected_tower = None
+        self.hud.set_selected_hero(h)
+
     def _on_skill_button(self, skill) -> None:
         if not skill.ready:
             return
@@ -354,7 +496,20 @@ class GameView(arcade.View):
             self.command.cast_skill(skill)
         else:
             self._pending_skill = skill
+            self._pending_skill_hero = None
             self._target_prompt.text = f"Click to target {skill.display_name}  (esc to cancel)"
+
+    def _on_hero_skill(self, skill, hero) -> None:
+        if hero is None or not hero.alive or not skill.ready:
+            return
+        if skill.target_kind.name == "SELF":
+            self.command.cast_skill(skill, hero=hero)
+        else:
+            self._pending_skill = skill
+            self._pending_skill_hero = hero
+            self._target_prompt.text = (
+                f"Click to target {skill.display_name}  (esc to cancel)"
+            )
 
     # --- per-frame -------------------------------------------------
 
@@ -390,15 +545,23 @@ class GameView(arcade.View):
         self.combat.resolve_engagement(self.units, self.enemies)
         for t in self.towers:
             t.try_attack(self.enemies, self)
-        self.combat.tick_projectiles(self.projectiles, self.enemies)
+        self.combat.tick_projectiles(self.projectiles, self.enemies, self)
 
         for e in list(self.enemies):
-            if not e.alive and (e.anim is None or e.anim.finished):
+            if e.leaked:
+                # Reached the exit: vanish immediately.
+                e.remove_from_sprite_lists()
+            elif not e.alive and (e.anim is None or e.anim.finished):
                 e.remove_from_sprite_lists()
         for u in list(self.units):
-            if not u.alive and getattr(u, "respawn_timer", 0.0) <= 0:
+            if not u.alive:
                 from td_game.entities.heroes.base_hero import BaseHero
-                if not isinstance(u, BaseHero):
+                if isinstance(u, BaseHero):
+                    # Hero sprite sticks around (invisible via hp check) until
+                    # the respawn timer in BaseHero.update_respawn restores it.
+                    continue
+                # Soldiers / reinforcements: cull once the death clip has played.
+                if u.anim is None or u.anim.finished:
                     u.remove_from_sprite_lists()
 
         for sp in list(self._fx_lifetimes.keys()):
@@ -430,6 +593,8 @@ class GameView(arcade.View):
             self.wave_preview.hide()
 
         self.hud.update(dt)
+        if self._selected_menu is not None and hasattr(self._selected_menu, "update_affordability"):
+            self._selected_menu.update_affordability(self.state.gold)
 
         if self.state.lost:
             self.state.bus.publish(LEVEL_LOST)
@@ -450,11 +615,24 @@ class GameView(arcade.View):
             self._draw_path_ribbon(curve, width=44, color=P.PATH)
         self.decor_sprites.draw()
         self.build_spot_sprites.draw()
+        self._draw_rally_flags()
         self.towers.draw()
         self.units.draw()
         self.enemies.draw()
         self.projectiles.draw()
         self.fx.draw()
+
+        # Selection ring around the active hero so the player always
+        # knows who right-click will command.
+        if self._selected_hero is not None and self._selected_hero.alive:
+            import time
+            pulse = 0.5 + 0.5 * math.sin(time.perf_counter() * 4.0)
+            arcade.draw_circle_outline(
+                self._selected_hero.center_x,
+                self._selected_hero.center_y + 2,
+                22 + pulse * 3,
+                (252, 232, 140, int(200 + pulse * 40)), 2,
+            )
 
         for e in self.enemies:
             draw_health_bar(e)
@@ -472,6 +650,18 @@ class GameView(arcade.View):
 
         if self._selected_menu is not None:
             self._selected_menu.draw()
+
+        if self._pending_rally_barracks is not None:
+            self._target_prompt.draw()
+            # Preview flag at cursor + a dashed line from the barracks.
+            arcade.draw_line(
+                self._pending_rally_barracks.center_x, self._pending_rally_barracks.center_y,
+                self._mouse_x, self._mouse_y,
+                (250, 210, 110, 180), 2,
+            )
+            self._barracks_flag_sprite.center_x = self._mouse_x
+            self._barracks_flag_sprite.center_y = self._mouse_y + 14
+            arcade.draw_sprite(self._barracks_flag_sprite)
 
         if self._pending_skill is not None:
             self._target_prompt.draw()

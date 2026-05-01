@@ -32,8 +32,11 @@ def make_knight(x: float, y: float, bus=None) -> BaseHero:
                      frame_duration=0.09, loop=LoopMode.LOOP)
     attack = Animation(frames=load_animation_frames("heroes", f"{KNIGHT_STATS.sprite_base}_attack", 3),
                        frame_duration=0.07, loop=LoopMode.ONCE)
+    death = Animation(frames=load_animation_frames("heroes", f"{KNIGHT_STATS.sprite_base}_death", 4),
+                      frame_duration=0.14, loop=LoopMode.ONCE)
     hero.anim = AnimationController(
-        states={AnimState.IDLE: idle, AnimState.WALK: walk, AnimState.ATTACK: attack},
+        states={AnimState.IDLE: idle, AnimState.WALK: walk,
+                AnimState.ATTACK: attack, AnimState.DEATH: death},
         initial=AnimState.IDLE,
     )
     return hero

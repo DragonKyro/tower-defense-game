@@ -35,31 +35,49 @@ def generate(name: str) -> Image.Image:
     bob = walk_bob(state, frame)
     lean = walk_lean(state, frame)
     arm = walk_arm(state, frame)
+    # `death` is a 4-frame fall: progressively tilt + sink + fade.
+    # We model it here by tweaking bob/lean into a floor-slump.
     dying = state == "death"
+    if dying:
+        # Override stride; interpret frame as fall progress (0..3).
+        bob = (2, 5, 9, 12)[min(frame, 3)]
+        lean = (0, 0, 0, 0)[min(frame, 3)]
+        arm = (0, 0, 0, 0)[min(frame, 3)]
 
     if kind == "orc":
-        _orc(img, d, s, bob, lean, arm, dying)
+        _orc(img, d, s, bob, lean, arm, dying, frame)
     elif kind == "goblin":
-        _goblin(img, d, s, bob, lean, arm, dying)
+        _goblin(img, d, s, bob, lean, arm, dying, frame)
     elif kind == "troll":
-        _troll(img, d, s, bob, lean, arm, dying)
+        _troll(img, d, s, bob, lean, arm, dying, frame)
     elif kind == "wraith":
         _wraith(img, d, s, frame, state)
     elif kind == "dragon":
         _dragon(img, d, s, frame, state)
     else:
-        _orc(img, d, s, bob, lean, arm, dying)
+        _orc(img, d, s, bob, lean, arm, dying, frame)
+
+    if dying and frame >= 2:
+        # Fade out: multiply the alpha channel.
+        alpha_scale = (0.85, 0.55, 0.25)[min(frame - 1, 2)]
+        img = _fade(img, alpha_scale)
 
     return finalize(img, TILE_SIZE)
 
 
+def _fade(img: Image.Image, factor: float) -> Image.Image:
+    """Multiply the alpha channel by `factor` (0..1) for a fade-out effect."""
+    r, g, b, a = img.split()
+    a = a.point(lambda v: int(v * factor))
+    img.putalpha(a)
+    return img
+
+
 # ----------------------------------------------------------------- Orc
 
-def _orc(img, d, s, bob, lean, arm, dying: bool) -> None:
+def _orc(img, d, s, bob, lean, arm, dying: bool, frame: int = 0) -> None:
     cx = cy = TILE_SIZE // 2
-    if dying:
-        cy += 10
-    soft_shadow(img, cx, cy + 16, 14, 5, scale=s, alpha=130)
+    soft_shadow(img, cx, cy + 16, 14, 5, scale=s, alpha=130 if not dying else 70)
 
     # Legs: feet stay on ground; front/back swing horizontally.
     leg_y = cy + 6
@@ -92,11 +110,9 @@ def _orc(img, d, s, bob, lean, arm, dying: bool) -> None:
 
 # --------------------------------------------------------------- Goblin
 
-def _goblin(img, d, s, bob, lean, arm, dying: bool) -> None:
+def _goblin(img, d, s, bob, lean, arm, dying: bool, frame: int = 0) -> None:
     cx = cy = TILE_SIZE // 2
-    if dying:
-        cy += 12
-    soft_shadow(img, cx, cy + 16, 11, 4, scale=s, alpha=120)
+    soft_shadow(img, cx, cy + 16, 11, 4, scale=s, alpha=120 if not dying else 60)
 
     leg_y = cy + 5
     shaded_rect(d, cx - 5 + lean, leg_y, 4, 7, P.LEATHER_DARK, scale=s)
@@ -124,11 +140,9 @@ def _goblin(img, d, s, bob, lean, arm, dying: bool) -> None:
 
 # --------------------------------------------------------------- Troll
 
-def _troll(img, d, s, bob, lean, arm, dying: bool) -> None:
+def _troll(img, d, s, bob, lean, arm, dying: bool, frame: int = 0) -> None:
     cx = cy = TILE_SIZE // 2
-    if dying:
-        cy += 8
-    soft_shadow(img, cx, cy + 18, 18, 6, scale=s, alpha=140)
+    soft_shadow(img, cx, cy + 18, 18, 6, scale=s, alpha=140 if not dying else 70)
 
     leg_y = cy + 7
     shaded_rect(d, cx - 9 + lean, leg_y, 7, 9, P.LEATHER_DARK, scale=s)
@@ -158,8 +172,14 @@ def _troll(img, d, s, bob, lean, arm, dying: bool) -> None:
 
 def _wraith(img, d, s, frame: int, state: str) -> None:
     cx = cy = TILE_SIZE // 2
-    soft_shadow(img, cx, cy + 18, 10, 3, scale=s, alpha=90)
-    glow(img, cx, cy - 4, 16, P.WRAITH_LIGHT, scale=s, alpha=120)
+    dying = state == "death"
+    if dying:
+        # Wraith dissolves: slight sink + weaker glow that fades with frame.
+        sink = (0, 4, 8, 12)[min(frame, 3)]
+        cy += sink
+    soft_shadow(img, cx, cy + 18, 10, 3, scale=s, alpha=60 if dying else 90)
+    glow_alpha = 120 if not dying else max(20, 120 - frame * 35)
+    glow(img, cx, cy - 4, 16, P.WRAITH_LIGHT, scale=s, alpha=glow_alpha)
     float_bob = [0, -1, -1, 0, -1, -1][frame % 6] if state == "walk" else 0
     wave = frame % 6
     pts = [
@@ -189,9 +209,17 @@ def _wraith(img, d, s, frame: int, state: str) -> None:
 
 def _dragon(img, d, s, frame: int, state: str) -> None:
     cx = cy = TILE_SIZE // 2
-    soft_shadow(img, cx, cy + 20, 16, 4, scale=s, alpha=110)
+    dying = state == "death"
+    if dying:
+        sink = (0, 4, 8, 12)[min(frame, 3)]
+        cy += sink
+    soft_shadow(img, cx, cy + 20, 16, 4, scale=s, alpha=60 if dying else 110)
     flap = [0, -2, -3, -2, 0, 2][frame % 6] if state == "walk" else 0
     body_bob = [0, -1, -2, -1, 0, 1][frame % 6] if state == "walk" else 0
+    if dying:
+        # Wings droop as dragon falls.
+        flap = (0, 3, 6, 8)[min(frame, 3)]
+        body_bob = 0
 
     wing_l = [(cx - 6, cy - 2 + body_bob), (cx - 24, cy - 10 + flap),
               (cx - 22, cy + 2 + flap), (cx - 10, cy + 4 + body_bob)]

@@ -37,6 +37,8 @@ def generate(name: str) -> Image.Image:
         return _flower(variant)
     if kind == "banner":
         return _banner(variant)
+    if kind == "rallyflag":
+        return _rally_flag(variant)
     if kind == "stones":
         return _stones(variant)
     if kind == "castle":
@@ -44,6 +46,27 @@ def generate(name: str) -> Image.Image:
     if kind == "mushroom":
         return _mushroom(variant)
     return _bush(variant)
+
+
+def _rally_flag(variant: str) -> Image.Image:
+    """Small pennant flag — gold = hero rally, red = barracks rally."""
+    size = 32
+    img, d, s = new_canvas(size)
+    pole_x = size // 2 - 6
+    # Pole
+    d.rectangle((pole_x * s, 4 * s, (pole_x + 2) * s, (size - 2) * s), fill=P.BANNER_POLE)
+    d.ellipse(((pole_x - 1) * s, 2 * s, (pole_x + 3) * s, 6 * s), fill=P.KNIGHT_GOLD)
+    # Pennant
+    color = P.KNIGHT_GOLD if variant == "hero" else P.BANNER_RED
+    pts = [
+        (pole_x + 2, 6),
+        (pole_x + 16, 8),
+        (pole_x + 12, 14),
+        (pole_x + 16, 20),
+        (pole_x + 2, 18),
+    ]
+    outline_polygon(d, pts, color, scale=s, shadow=False)
+    return finalize(img, size)
 
 
 # ------------------------------------------------------------- Trees

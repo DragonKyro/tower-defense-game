@@ -26,11 +26,11 @@ class HeroStats:
     max_hp: float
     damage: float
     attack_interval: float
-    speed: float = 90.0
+    speed: float = 120.0
     armor: float = 0.0
     magic_resist: float = 0.0
-    engage_radius: float = 48.0
-    aggression_radius: float = 140.0
+    engage_radius: float = 72.0
+    aggression_radius: float = 160.0
     xp_curve: tuple[int, ...] = (50, 130, 240, 400, 620, 900, 1260, 1700, 2220)
     sprite_base: str = "knight"
     description: str = ""
@@ -101,6 +101,9 @@ class BaseHero(BaseUnit):
             self.center_y = self._home_y
             self.rally_x = self._home_x
             self.rally_y = self._home_y
+            if self.anim is not None:
+                from td_game.graphics.anim_controller import AnimState
+                self.anim.set_state(AnimState.IDLE, force=True)
             if self.bus is not None:
                 self.bus.publish(HERO_RESPAWNED, hero=self)
 

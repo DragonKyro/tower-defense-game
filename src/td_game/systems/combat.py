@@ -53,9 +53,18 @@ class CombatSystem:
 
     # --- projectiles ------------------------------------------------
 
-    def tick_projectiles(self, projectiles, enemies) -> None:
+    def tick_projectiles(self, projectiles, enemies, scene) -> None:
         for p in list(projectiles):
             if p.dead:
+                # Arc projectiles resolve their splash on impact *before* being
+                # culled. Previously the cull ran first and the AoE never fired.
+                if isinstance(p, ArcProjectile) and p.aoe_radius > 0 \
+                        and not getattr(p, "_aoe_resolved", False):
+                    p._aoe_resolved = True
+                    for e in collision.in_radius(p.center_x, p.center_y, p.aoe_radius, enemies):
+                        e.take_damage(p.packet)
+                    if scene is not None:
+                        scene.spawn_fx("explosion_0", p.center_x, p.center_y, lifetime=0.45)
                 p.remove_from_sprite_lists()
                 continue
             # Straight & homing: hit test on overlap.
@@ -68,6 +77,3 @@ class CombatSystem:
                     if dx * dx + dy * dy <= 16 * 16:  # ~hit radius
                         p.on_impact(e, None)
                         break
-            elif isinstance(p, ArcProjectile) and p.dead and p.aoe_radius > 0:
-                for e in collision.in_radius(p.center_x, p.center_y, p.aoe_radius, enemies):
-                    e.take_damage(p.packet)

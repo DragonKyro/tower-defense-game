@@ -34,6 +34,24 @@ def smooth_waypoints(waypoints: Sequence, iterations: int = 3) -> list[Point]:
     return pts
 
 
+def nearest_point_on_curves(curves: Sequence[Sequence[Point]], x: float, y: float) -> Point:
+    """Return the closest (x, y) on any of the supplied smoothed curves.
+
+    Used to auto-place a barracks rally on the path the enemies take.
+    """
+    best: Point = (x, y)
+    best_d2 = float("inf")
+    for curve in curves:
+        for px, py in curve:
+            dx = px - x
+            dy = py - y
+            d2 = dx * dx + dy * dy
+            if d2 < best_d2:
+                best = (px, py)
+                best_d2 = d2
+    return best
+
+
 def path_ribbon(points: Sequence[Point], half_width: float) -> list[Point]:
     """Build a closed polygon (left edge + right edge reversed) around a polyline.
 

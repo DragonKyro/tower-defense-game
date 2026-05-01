@@ -23,26 +23,36 @@ class Button:
     enabled: bool = True
     hotkey: str | None = None
     icon: arcade.Texture | None = None   # if set, drawn centered (scaled to fit)
+    subtitle: str | None = None          # optional small badge under the icon (e.g. cost)
 
     # internal
     hovered: bool = field(default=False, init=False)
+    cooldown_fraction: float = field(default=0.0, init=False)  # 1.0 = just fired, 0.0 = ready
     _text: arcade.Text | None = field(default=None, init=False, repr=False)
     _hotkey_text: arcade.Text | None = field(default=None, init=False, repr=False)
+    _subtitle_text: arcade.Text | None = field(default=None, init=False, repr=False)
     _icon_sprite: arcade.Sprite | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
-        # If an icon texture is provided, only render it (no label text).
         if self.icon is not None:
             sp = arcade.Sprite()
             sp.texture = self.icon
-            # Fit icon into (width - 10) x (height - 10) leaving room for hotkey.
+            # Icon sits in the upper portion; subtitle (if any) goes below.
+            subtitle_space = 14 if self.subtitle else 0
             pad = 8
-            target = min(self.width - pad, self.height - pad)
+            target = min(self.width - pad, self.height - pad - subtitle_space)
             scale = target / max(self.icon.width, self.icon.height)
             sp.scale = (scale, scale)
             sp.center_x = self.x
-            sp.center_y = self.y
+            sp.center_y = self.y + subtitle_space / 2
             self._icon_sprite = sp
+            if self.subtitle:
+                self._subtitle_text = arcade.Text(
+                    self.subtitle,
+                    self.x, self.y - self.height / 2 + 4,
+                    color=(248, 220, 120), font_size=11, bold=True,
+                    anchor_x="center", anchor_y="baseline",
+                )
         else:
             self._text = arcade.Text(
                 self.label, self.x, self.y,
@@ -120,11 +130,22 @@ class Button:
         arcade.draw_lrbt_rectangle_outline(left, right, bottom, top, border, 2)
 
         if self._icon_sprite is not None:
+            subtitle_space = 14 if self.subtitle else 0
             self._icon_sprite.center_x = self.x
-            self._icon_sprite.center_y = self.y
-            # Darken when disabled (approximate via an overlay).
+            self._icon_sprite.center_y = self.y + subtitle_space / 2
             arcade.draw_sprite(self._icon_sprite)
-            if not self.enabled:
+            if self._subtitle_text is not None:
+                self._subtitle_text.draw()
+            # Cooldown mask: rising dark overlay from the bottom based on
+            # `self.cooldown_fraction` (1.0 = full cover / just fired,
+            # 0.0 = ready). Drawn last so it sits over the icon.
+            cd_frac = getattr(self, "cooldown_fraction", 0.0)
+            if cd_frac > 0.001:
+                cover_h = (top - bottom) * min(1.0, cd_frac)
+                arcade.draw_lrbt_rectangle_filled(
+                    left, right, bottom, bottom + cover_h, (0, 0, 0, 175),
+                )
+            if not self.enabled and cd_frac <= 0.001:
                 arcade.draw_lrbt_rectangle_filled(left, right, bottom, top, (0, 0, 0, 140))
         elif self._text is not None:
             if self._text.color != text_color:

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import arcade
 
+from td_game.core.resources import load_texture
 from td_game.data.towers import TOWER_TREES
 
 from .button import Button
@@ -17,18 +18,23 @@ class BuildMenu:
         self.anchor_y = y
         self.buttons: list[Button] = []
         self._family_by_btn: dict[Button, str] = {}
-        dx = -(len(allowed) - 1) * 32
+        btn_w = 68
+        spacing = 6
+        dx = -((btn_w + spacing) * (len(allowed) - 1)) / 2
         for family in allowed:
             cost = TOWER_TREES[family].tiers[0].cost
+            tex = load_texture("towers", f"{family}_1")
             b = Button(
-                x=x + dx, y=y + 76,
-                width=60, height=60,
-                label=f"{_family_short(family)}\n{cost}g",
+                x=x + dx, y=y + 86,
+                width=btn_w, height=btn_w,
+                label=_family_short(family),
                 on_click=(lambda f=family: on_pick(f, spot)),
+                icon=tex,
+                subtitle=f"{cost}g",
             )
             self.buttons.append(b)
             self._family_by_btn[b] = family
-            dx += 64
+            dx += btn_w + spacing
 
     @property
     def hovered_family(self) -> str | None:
@@ -36,6 +42,10 @@ class BuildMenu:
             if b.hovered:
                 return family
         return None
+
+    def update_affordability(self, gold: int) -> None:
+        for b, family in self._family_by_btn.items():
+            b.set_enabled(gold >= TOWER_TREES[family].tiers[0].cost)
 
     def update_hover(self, x: float, y: float) -> None:
         for b in self.buttons:
@@ -75,7 +85,11 @@ class BuildMenu:
 
 
 class UpgradeMenu:
-    """Menu for an existing tower: shows next upgrade options + sell."""
+    """Menu for an existing tower: shows next upgrade options + sell.
+
+    For a barracks, rally is not set from this menu — right-click on the
+    map while the barracks is selected to move its rally.
+    """
     def __init__(self, tower, x: float, y: float, on_upgrade, on_sell) -> None:
         self.tower = tower
         self.anchor_x = x
@@ -83,24 +97,40 @@ class UpgradeMenu:
         upgrades = tower.next_upgrades()
         self.buttons: list[Button] = []
         self._node_by_btn: dict[Button, str] = {}
-        dx = -(len(upgrades) - 1) * 32 if upgrades else 0
+        self._cost_by_btn: dict[Button, int] = {}
+        btn_w = 68
+        spacing = 6
+        dx = -((btn_w + spacing) * (len(upgrades) - 1)) / 2 if upgrades else 0
         for node_id, row in upgrades:
+            # Show the next-tier sprite as the upgrade icon.
+            if node_id.isdigit():
+                tier_num = int(node_id) + 1  # 0-indexed; file names are 1-indexed
+            else:
+                tier_num = 4
+            tex = load_texture("towers", f"{tower.family}_{tier_num}")
             b = Button(
-                x=x + dx, y=y + 76,
-                width=60, height=60,
-                label=f"{_short_label(row.display_name)}\n{row.cost}g",
+                x=x + dx, y=y + 86,
+                width=btn_w, height=btn_w,
+                label=_short_label(row.display_name),
                 on_click=(lambda nid=node_id: on_upgrade(tower, nid)),
+                icon=tex,
+                subtitle=f"{row.cost}g",
             )
             self.buttons.append(b)
             self._node_by_btn[b] = node_id
-            dx += 64
+            self._cost_by_btn[b] = row.cost
+            dx += btn_w + spacing
         self._sell_btn = Button(
             x=x, y=y - 56,
-            width=108, height=32,
+            width=140, height=34,
             label=f"Sell {tower.sell_value()}g",
             on_click=(lambda: on_sell(tower)),
         )
         self.buttons.append(self._sell_btn)
+
+    def update_affordability(self, gold: int) -> None:
+        for b, cost in self._cost_by_btn.items():
+            b.set_enabled(gold >= cost)
 
     def update_hover(self, x: float, y: float) -> None:
         for b in self.buttons:

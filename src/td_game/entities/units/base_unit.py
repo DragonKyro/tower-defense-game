@@ -63,6 +63,24 @@ class BaseUnit(Entity):
         enemy._attack_cd = getattr(enemy.stats, "melee_interval", 1.0) * 0.5
         return True
 
+    def on_death(self) -> None:
+        super().on_death()
+        if self.anim is not None:
+            from td_game.graphics.anim_controller import AnimState
+            self.anim.set_state(AnimState.DEATH, force=True)
+
+    def disengage(self) -> None:
+        """Drop current engagements.
+
+        Used when the player explicitly rallies the hero elsewhere — the
+        hero abandons the fight, enemies resume walking. Matches KR feel.
+        """
+        for e in self.blocking:
+            if getattr(e, "engaged_by", None) is self:
+                e.engaged_by = None
+                e._attack_cd = 0.0
+        self.blocking.clear()
+
     def on_update(self, dt: float) -> None:
         super().on_update(dt)
         if not self.alive or self.stunned:
@@ -83,6 +101,8 @@ class BaseUnit(Entity):
                 if self.anim is not None:
                     self.anim.set_state(AnimState.ATTACK, force=True)
                 target.take_damage(DamagePacket(self.damage, DamageType.PHYSICAL, source=self))
+                if self._scene is not None:
+                    self._scene.spawn_fx("hit_0", target.center_x, target.center_y + 4, lifetime=0.18)
                 self._cooldown = self.attack_interval
             elif self.anim is not None and self.anim.finished:
                 self.anim.set_state(AnimState.IDLE)
@@ -113,16 +133,23 @@ class BaseUnit(Entity):
                     self.anim.set_state(AnimState.IDLE)
 
     def _pursue_target(self):
-        """Pick the nearest living enemy within aggression_radius of the unit."""
+        """Pick the nearest living enemy within aggression_radius of the *rally* point.
+
+        Measuring from the rally (not the unit's current position) keeps the
+        unit tethered — a hero you right-click to a new spot doesn't drift off
+        chasing distant enemies; soldiers hold the path their barracks rallied
+        on instead of wandering.
+        """
         if self._scene is None:
             return None
         best = None
         best_d2 = self.aggression_radius * self.aggression_radius
+        rx, ry = self.rally_x, self.rally_y
         for e in self._scene.enemies:
             if not e.alive or getattr(e, "is_flying", False):
                 continue
-            dx = e.center_x - self.center_x
-            dy = e.center_y - self.center_y
+            dx = e.center_x - rx
+            dy = e.center_y - ry
             d2 = dx * dx + dy * dy
             if d2 <= best_d2:
                 best = e
