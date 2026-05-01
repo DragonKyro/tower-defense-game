@@ -29,7 +29,10 @@ ASSETS_DIR = PROJECT_ROOT / "assets"
 SPRITES_DIR = ASSETS_DIR / "sprites"
 AUDIO_DIR = ASSETS_DIR / "audio"
 FONTS_DIR = ASSETS_DIR / "fonts"
-GENERATED_SPRITES_DIR = PROJECT_ROOT / "generated_sprites"
+# Procedural caches live under assets/ so every piece of art/audio in
+# the project sits under a single top-level folder. They're gitignored.
+GENERATED_SPRITES_DIR = ASSETS_DIR / "generated_sprites"
+GENERATED_AUDIO_DIR = ASSETS_DIR / "generated_audio"
 
 # --- Z-order layers ------------------------------------------------------
 

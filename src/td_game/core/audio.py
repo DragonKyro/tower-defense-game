@@ -16,10 +16,7 @@ import arcade
 
 from td_game.graphics.procedural.audio_gen import generate_to
 
-from .constants import AUDIO_DIR, PROJECT_ROOT
-
-
-GENERATED_AUDIO_DIR = PROJECT_ROOT / "generated_audio"
+from .constants import AUDIO_DIR, GENERATED_AUDIO_DIR
 
 
 class AudioManager:

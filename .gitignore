@@ -39,7 +39,11 @@ Thumbs.db
 # Logs
 *.log
 
-# Procedurally generated sprite cache (regenerated on run)
+# Procedurally generated asset caches (regenerated on run).
+# Live under assets/ alongside shipped content but never committed.
+assets/generated_sprites/
+assets/generated_audio/
+# Old top-level cache locations (kept in gitignore so any leftover from
+# pre-move checkouts stays untracked).
 generated_sprites/
-# Procedurally generated audio cache (regenerated on run)
 generated_audio/
